@@ -1,6 +1,4 @@
 
-
-
 module AutoLoad
 
   def testing_dir? full_name

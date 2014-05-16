@@ -1,0 +1,22 @@
+
+
+
+JOURNAL UPDATE PROCESS
+
+Assumes processing of a single member:
+
+* get the current allocation period
+* get the emp stat hist for the current allocation period
+* get the journal for the current allocation period
+* compute CH additions
+* compute CH deletions
+* apply additions to journal
+* apply deletions to journal
+
+
+Apply 
+
+
+
+
+CREATE FB PROCESS
