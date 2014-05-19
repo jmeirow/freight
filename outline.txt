@@ -14,9 +14,79 @@ Assumes processing of a single member:
 * apply deletions to journal
 
 
-Apply 
+* update damages
+if no new deletions 
+	stop 
+else
+  if no FB previously applied
+  	stop
+  else
+  	if new deletion(s) occur AFTER most recent FB
+  		stop
+  	else
+  		recompute damages for current FB update
+  	end
+  end
+end
+
+
+CREATE STATEMENTS
+
+	delete any statement data that exists for this period (retry after failure)
+	delete any FB recorded with this statement date
+
+	get activity since last statement (compute net changes)
+
+	get current benefit package and rate (based on tier)
+
+	get current balance
+
+	if current balance > amount needed
+		add line to statement (FB earned)
+
+
+	- Determine if an FB can be applied
+			get eligibility
+			if any gaps > statement date
+				record FB
+				add line to statement (FB used)
 
 
 
 
-CREATE FB PROCESS
+BALANCES
+
+Create Sinatra service that can return current balance (could be negative) for current allocation period
+
+Params:  memberid, as_of_date
+
+
+
+	
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
