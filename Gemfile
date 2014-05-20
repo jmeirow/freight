@@ -9,6 +9,7 @@ gem 'sequel'
 
 group :development do
   # gem 'win32console'
+  gem 'timecop'
   gem 'guard'
   gem 'guard-rspec'
   gem 'rspec-core'

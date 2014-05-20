@@ -3,6 +3,12 @@ require 'tiny_tds'
 require 'date'
 require 'pp'
 require './money'
+require_relative './daily_rate_contribution.rb'
+require_relative './freight_account_entry.rb'
+
+
+
+
 
 module Employment
   module EmploymentHistory
@@ -276,82 +282,145 @@ module Eligibility
 
   module FreightAccumulation
     class Repository
-      def self.save journal  
-        db = Connection.db_teamsters
-        db["DELETE FROM FreightJournal WHERE MemberId = ?", journal.records.first[:member_id]].delete
-        sql = "INSERT INTO FreightJournal (MemberId, CompanyInformationId, WeekStarting, Amount, IsAdjustment, EntryType, UserId, UserDate )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ? ) "
-        journal.records.each do |entry|
+      
 
-          db[sql, entry[:member_id]  , entry[:company_information_id]  , entry[:week_starting]  , entry[:amount].amount  , entry[:is_adjustment]  , entry[:entry_type] , entry[:user_id], Time.now ].insert 
-        end
+
+      def self.add additions  
+        db = Connection.db_teamsters
+        # db["DELETE FROM FreightAccount WHERE MemberId = ?", account.records.first[:member_id]].delete
+        sql = "INSERT INTO FreightAccount (MemberId, CompanyInformationId, WeekStarting, Amount,    EntryType, UserId, UserDate )
+        VALUES (?, ?, ?,   ?, ?, ?, ? ) "
+        
+         
+          additions.each do |entry|
+            db[sql, entry.member_id  , entry.company_information_id  , entry.week_starting_date   , entry.amount.amount, 
+              'contribution' , 'FreightBatch', Time.now ].insert 
+          end
+        
+      end
+
+      def self.reverse deletions  
+        db = Connection.db_teamsters
+        # db["DELETE FROM FreightAccount WHERE MemberId = ?", account.records.first[:member_id]].delete
+        sql = "INSERT INTO FreightAccount (MemberId, CompanyInformationId, WeekStarting, Amount,    EntryType, UserId, UserDate )
+        VALUES (?, ?, ?,   ?, ?, ?, ? ) "
+        
+         
+          deletions.each do |entry|
+            db[sql, entry.member_id  , entry.company_information_id  , entry.week_starting_date   , (entry.amount.amount * -1), 
+              'correction' , 'FreightBatch', Time.now ].insert 
+          end
+        
       end
 
 
-      def self.half_pay_weeks_for_accumulation member_id 
+      def self.half_pay_from_bbs_2012 member_id
         db = Connection.db_teamsters
-        sql = "SELECT DateAdd(DAY,-6,WeekEnding) WeekStarting, MemberID, CompanyInformationID , EmploymentStatus , WeekNo as WeekNbr
-          FROM BillingPeriodWeekEnds A
-          INNER JOIN ParticipantEmploymentHistory B on A.WeekEnding between b.FromDate and b.ToDate
-          WHERE WeekEnding >= ? AND EmploymentStatus = 'CH' and MemberID = ? and B.CompanyInformationID in 
-          (
-              select distinct bd.CompanyInformationID
-              from BillData bd
-              INNER JOIN BillItem bi on bd.BillDataNumber = bi.BillDataNumber
-              WHERE bi.MemberId = ?
 
-            )
-          ORDER by 2, 1"
+        sql = "  
 
-        File.open("accum.sql", "a") do |f|
-          f.puts sql 
-        end
-        
+          select distinct MemberID, DateAdd(day,-6,WeekEnding ) WeekStarting, CompanyInformationId, UserDate = DateAdd(day,-6,WeekEnding) 
+          from BasicEligibilityWeeklyHistory t1
+          where EmploymentStatus = 'CH'
+          and WeeklyStatus = 'BB'
+          and memberid = #{member_id}
+          and WeekEnding between '4/1/2012' and '3/29/2014'
+          
+        "
         records = []
-        db.fetch(sql, FREIGHT_ACCUM_START_DATE, member_id, member_id  ).each do |row|
+        db.fetch(sql   ).each do |row|
           hash = Hash.new
           hash[:member_id] = row[:memberid]
-          hash[:week_starting] = row[:weekstarting].to_date
+          hash[:week_starting_date] = row[:weekstarting].to_date
           hash[:company_information_id] = row[:companyinformationid]
-          hash[:employment_status] = row[:employmentstatus]
-          hash[:week_nbr] = row[:weeknbr]
           hash[:user_date] =  row[:weekstarting].to_date
           hash[:amount] = Money.new(34.00)
-          records << hash        
+          records << DailyRateContribution.new(hash)   
         end
         records
       end
- 
+
+
+
+
+      def self.half_pay_weeks  member_id , allocation_period
+        db = Connection.db_teamsters
+        sql = "          
+          SELECT distinct DateAdd(DAY,-6,WeekEnding) WeekStarting, CompanyInformationId 
+          FROM BillingPeriodWeekEnds A
+          INNER JOIN ParticipantEmploymentHistory B on A.WeekEnding between b.FromDate and b.ToDate
+          WHERE WeekEnding  between ? and  ?
+          AND EmploymentStatus = 'CH'
+          AND memberid = ?  "
+
+
+        
+        records = []
+        db.fetch(sql, allocation_period.first, allocation_period.last, member_id  ).each do |row|
+          hash = Hash.new
+          hash[:member_id] = member_id
+          hash[:week_starting_date] = row[:weekstarting].to_date
+          hash[:user_date] =  row[:weekstarting].to_date
+          hash[:company_information_id] = row[:companyinformationid]
+          hash[:amount] = Money.new(34.00)
+          records << DailyRateContribution.new(hash)            
+        end
+        records
+      end
 
     
-      def self.get_freight_journal member_id 
+      def self.get_freight_account member_id 
         db = Connection.db_teamsters
-        sql = "SELECT   MemberId , CompanyInformationId , WeekStarting ,Amount , IsAdjustment,  EntryType, UserDate   
-        from FreightJournal where MemberID = ?"
+        sql = "SELECT  TxnId, MemberId , CompanyInformationId , WeekStarting ,Amount , EntryType, UserDate   
+        from FreightAccount where MemberID = ?"
         records = []
         db.fetch(sql, member_id).each do |row|
           hash = Hash.new
+          hash[:txn_id] = row[:txnid]
           hash[:member_id] = row[:memberid]
-          hash[:week_starting] = row[:weekstarting].to_date
+          hash[:week_starting_date] = row[:weekstarting].to_date
           hash[:company_information_id] = row[:companyinformationid]
-          hash[:is_adjustment] = row[:isadjustment]
           hash[:user_date] = row[:userdate].to_date
           hash[:entry_type] =  row[:entrytype]
           hash[:amount] = Money.new(34.00)
-          records << hash        
+          records << FreightAccountEntry.new(hash)        
         end
         records
       end
 
 
-      def self.freight_guys_since_apr_2014
+      def self.freight_member_ids
         db = Connection.db_teamsters
-        sql = "select distinct MemberId from ParticipantEmploymentHistory where EmploymentStatus = 'CH' and ToDate >= ? and MemberId in  (select Distinct MemberID from BillItem )
+        sql = "
+
+              -- INITIAL PERIOD WHERE CH w/ BB COUNTED AS CONTRIBUTION
+                select t1.MemberId 
+                from BasicEligibilityWeeklyHistory t1
+                where EmploymentStatus = 'CH'
+                and WeeklyStatus = 'BB'
+                and WeekEnding between '4/1/2012' and '3/29/2014'
+
+ 
               UNION
-              select distinct MemberId from FreightJournal"
+
+              -- ANYTIME AFTER INITIAL PERIOD 
+              SELECT DISTINCT MemberId 
+              FROM ParticipantEmploymentHistory 
+              WHERE EmploymentStatus = 'CH' 
+              AND ToDate >= '3/30/2014'  
+              UNION
+
+
+
+              -- MEMBERS ALREADY IN FREIGHT ACCOUNT
+              SELECT DISTINCT MemberId FROM FreightAccount
+
+
+              "
+
         records = []
-        db.fetch(sql, FREIGHT_ACCUM_START_DATE).each do |row|
-          records << {:member_id => row[:memberid]}
+        db.fetch(sql).each do |row|
+          records <<  row[:memberid] 
         end
         records
       end
@@ -409,73 +478,7 @@ end
 
 class Connection
   def self.db_teamsters
-    # Sequel.ado(:conn_string=>"Provider=SQLNCLI11;Server=localhost;Database=Teamsters;Uid=dbuser; Pwd=dbuser123;")
-    # do postgresqlSequel.ado(:conn_string=>"Provider=SQLNCLI11;Server=localhost;Database=Teamsters;Uid=dbuser; Pwd=dbuser123;")
-
+    Sequel.ado(:conn_string=>"Provider=SQLNCLI11;Server=localhost;Database=Teamsters;Uid=dbuser; Pwd=dbuser123;")
   end
 end
-
-# def test_insert_method
-#   records = []
-#   records << {:memberid => 1  ,  :company_information_id => 2000  ,  :week_starting => Date.today  ,  :amount => 34.00  ,  :is_adjustment => false  ,  :entry_type => 'contribution', :user_date => DateTime.now, :user_id => 'meirowj'}
-#   records << {:memberid => 1  ,  :company_information_id => 2000  ,  :week_starting => Date.today+7  ,  :amount => 34.00  ,  :is_adjustment => false  ,  :entry_type => 'contribution', :user_date => DateTime.now, :user_id => 'meirowj'}
-#   Eligibility::FreightAccumulation::Repository.save records
-# end
-
-# def test_participant_employment_history_fetch
-#   Employment::EmploymentHistory::Repository.get_by_member_and_company 38109, 6368
-# end
-
-
-# def test_freight_benefit_insert_method
-#   records = []
-#   records << {:memberid => 1  ,     :weekending => Date.today  ,      :status_code => 'FB' }
-#   records << {:memberid => 1  ,     :weekending => Date.today+7  ,    :status_code => 'FB' }
-#   Eligibility::FreightBenefit::Repository.save records
-# end
-
-# def test_freight_guys_since_apr_2014
-#   Eligibility::FreightAccumulation::Repository.freight_guys_since_apr_2014
-# end 
-
-# def test_half_pay_weeks_for_accumulation member_id
-#   Eligibility::FreightAccumulation::Repository.half_pay_weeks_for_accumulation member_id
-# end 
-
-
-# def test_get_freight_journal member_id
-#   Eligibility::FreightAccumulation::Repository.get_freight_journal member_id
-# end 
-# def test_get_max_billing_period_for_member member_id
-#   Billing::MemberBillingInformation::Repository.get_max_billing_period_for_member member_id
-# end 
-# def test_uncovered_weeks member_id, date_range
-#   Eligibility::Coverage::UncoveredWeeks.get_for_member member_id, date_range 
-# end
-
-# # def test_distinct_billing_periods_for_weekendings
-# #   Billing::Calendar::BillingPeriod.distinct_billing_periods_for_weekendings weekendings 
-# # end 
-
-
-
-# #test_insert_method
-# #pp test_participant_employment_history_fetch.collect { |x| x[:member_id] }
-# #test_freight_benefit_insert_method
-# #pp test_freight_guys_since_apr_2014
-# #pp test_half_pay_weeks_for_accumulation 60234
-# #pp test_get_freight_journal 1
-# # pp test_get_max_billing_period_for_member 95419
-# #test_uncovered_weeks 99439,( Date.new(2010,9,1)..Date.new(2010,9,30))
-# #pp test_distinct_billing_periods_for_weekendings 
-
-
-
-
-# # def test_uncovered_weeks_with_rates member_id, company_information_id ,uncovered_weeks
-# #   Billing::Rates::RatesForWeeks.get_rates_for_weeks member_id, company_information_id ,uncovered_weeks
-# # end
-
-# # pp test_uncovered_weeks_with_rates 109236, 6000, [Date.new(2014,3,1), Date.new(2014,4,1), Date.new(2014,5,1)]
-
-
+ 

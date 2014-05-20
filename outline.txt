@@ -26,6 +26,9 @@ Assumes processing of a single member:
     end
 
 
+MAKE SURE THERE IS CLEAR UNDERSTANDING ON WHEN TIMING WHEN CUTTING OVER TO A NEW ALLOCATION PERIOD, REPORTING, AND WHAT IS CONSIDERED
+THE CURRENT REPORTING PERIOD
+
   
 Current Allocation Period Processing
 
@@ -76,7 +79,10 @@ CREATE STATEMENTS
 
 
 
+INITIAL VERSION
 
+Get CHs Not Posted Before
+Update Journal
 	
 
 
