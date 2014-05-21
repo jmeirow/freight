@@ -69,9 +69,7 @@ module  Billing
 
 
     class RatesForWeeks
-      def self.get_rates_for_periods member_id, company_information_id ,periods
-        raise "exactly three periods required" unless periods.length == 3
-        period1 = "'#{periods[0]}'"; period2 = "'#{periods[1]}'"; period3 = "'#{periods[2]}'"
+      def self.get_rates_for_week_ending member_id, company_information_id ,weekending
         db = Connection.db_teamsters
 
         sql = "select TierRate, CompanyInformationId, memberId, WeekEnding, Z.PlanHeaderId, LotTpdAndDeathAmount,
@@ -152,7 +150,7 @@ module  Billing
                INNER JOIN  BillingPeriodWeekEnds BW     
                 ON BW.Weekending BETWEEN DB.BilingStartDate AND DB.BilingEndDate     
               WHERE DR.DependentRelationCode IN  ('H','W')  
-              AND BW.Period in  (#{period1}, #{period2}, #{period3}) 
+              AND BW.Weekending  = #{week_ending.strftime('%m/%d/%Y')}  
               GROUP BY DP.MemberID, BW.Period, BW.Weekending   
              ) SP  
             ON M.MemberID = SP.MemberID  
@@ -190,14 +188,14 @@ module  Billing
                INNER JOIN  BillingPeriodWeekEnds BW     
                 ON BW.Weekending BETWEEN DB.BilingStartDate AND DB.BilingEndDate     
               WHERE DR.DependentRelationCode IN  ('SA','S','SP','SH','MG','D','FG','DP','DH','PD','O' ,'SS','PS','DA','SD')  
-              AND BW.Period in (#{period1}, #{period2}, #{period3})  
+               AND BW.Weekending  = #{week_ending.strftime('%m/%d/%Y')}  
               GROUP BY DP.MemberID, BW.Period, BW.Weekending  
              ) KD  
             ON M.MemberID = KD.MemberID  
             AND VC.Weekending = KD.WeekEnding  
               
             WHERE (M.MemberID = #{member_id} OR M.MemberID = 0)
-            AND VC.Period in (#{period1}, #{period2}, #{period3})  
+             AND VC.Weekending  = #{week_ending.strftime('%m/%d/%Y')}  
             AND C.CompanyInformationID = #{company_information_id}  
             ) Z
 
@@ -209,7 +207,7 @@ module  Billing
           INNER JOIN BenefitType  bt on bt.BenefitTypeId = rate.BenefitTypeId 
           INNER JOIN PlanDetail pd on pd.BenefitTypeID = bt.BenefitTypeId
           Where bt.BenefitId In (3, 7 , 8)
-          And  #{period1} between RateStartDate and RateEndDate
+          And  #{week_ending} between RateStartDate and RateEndDate
           group by PlanHeaderId
           ) Y on Z.PlanHeaderID = Y.PlanHeaderID
 
@@ -270,13 +268,30 @@ end
 
 
 module Eligibility
-  module FreightCoverage
+  module FreightBenefit
     class Repository
       def self.insert_changed_member_id member_id  
         db = Connection.db_teamsters
         sql = "INSERT INTO ChangedMemberId ( MemberID, TableName, ActionCd  ) VALUES (?, 'BasicEligibilityMembers', 'U'  ) "
         db[sql, member_id ].insert 
       end
+
+      def self.add member_id, data
+
+      end 
+
+      def self.remove member_id, week_starting_date
+      
+      end
+
+      def self.freight_benefit member_id 
+        sql = "select * from FreightBenefit WHERE member_id = ? "
+
+        
+
+      end
+
+
     end
   end
 
@@ -382,7 +397,7 @@ module Eligibility
           hash[:company_information_id] = row[:companyinformationid]
           hash[:user_date] = row[:userdate].to_date
           hash[:entry_type] =  row[:entrytype]
-          hash[:amount] = Money.new(34.00)
+          hash[:amount] = Money.new(row[:amount])
           records << FreightAccountEntry.new(hash)        
         end
         records
