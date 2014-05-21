@@ -19,8 +19,6 @@ class Date
     (0..6).collect{ |x| self.mctwf_saturday_of_week+(7*x)}.select{ |x| x.month == self.mctwf_saturday_of_week.month}.last 
   end 
 
-  def mctwf_month_begin_date
-    
 
 
 end

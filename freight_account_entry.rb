@@ -4,10 +4,10 @@ require_relative './money.rb'
 class FreightAccountEntry 
   include DataAccessObject 
 
-  attr_accessor :txn_id, :member_id,  :company_information_id, :week_starting_date, :amount, :entry_type,   :user_date
+  attr_accessor :txn_id, :member_id,  :company_information_id, :week_starting_date, :amount, :entry_type,   :user_date, :plan_code, :is_reversal, :note 
 
   def initialize attributes
-    fields =  [:txn_id, :member_id,  :company_information_id, :week_starting_date, :amount, :entry_type,   :user_date]
+    fields =  [:txn_id, :member_id,  :company_information_id, :week_starting_date, :amount, :entry_type,   :user_date, :plan_code, :is_reversal, :note ]
     populate  fields, attributes
   end
 
@@ -16,9 +16,7 @@ class FreightAccountEntry
     entry_type == 'contribution'
   end
 
-  def is_correction?
-    entry_type == 'correction'
-  end
+ 
 
   def is_coverage?
     entry_type == 'coverage'
@@ -28,9 +26,7 @@ class FreightAccountEntry
     'contribution'
   end
 
-  def self.correction
-    'correction'
-  end
+ 
 
   def self.coverage
     'coverage'
@@ -43,10 +39,29 @@ class FreightAccountEntry
     current_entry_weeks = []
     weeks = account_entries.collect {|x| x.week_starting_date}.sort.uniq
     weeks.each do |week|
-      current_entry_weeks << week if account_entries.select{|x| (x.week_starting_date == week  && (!x.coverage?)) }.count.odd?
+      current_entry_weeks << week if account_entries.select{|x| (x.week_starting_date == week  && (x.is_contribution?)) }.count.odd?
     end
     current_entry_weeks
   end
+
+
+  def self.get_account_current_coverage_entries(account_entries)
+    account_entries.sort!{|x| x.user_date <=> x.user_date}
+    current_fb_week_starting_dates = []
+    current_fb_entries = []
+
+    weeks = account_entries.collect {|x| x.week_starting_date}.sort.uniq
+    weeks.each do |week|
+      current_fb_week_starting_dates << week if account_entries.select{|x| (x.week_starting_date == week  && (x.is_coverage?)) }.count.odd?
+    end
+
+    current_fb_week_starting_dates.each do |week_starting_date|  
+      current_fb_entries << account_entries.select{|x| x.week_starting_date == week_starting_date }.last 
+    end
+    current_fb_entries
+  end
+
+
 
 
   def self.get_additions_for_account(emp_stat_data,account_entries)

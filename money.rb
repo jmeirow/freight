@@ -22,6 +22,10 @@ require 'bigdecimal'
       money == amt.amount
     end
 
+    def != amt
+      !(money == amt.amount)
+    end
+
     def >= amt
       money >= amt.amount
     end

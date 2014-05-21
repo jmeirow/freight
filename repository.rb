@@ -11,6 +11,7 @@ require_relative './freight_account_entry.rb'
 
 
 module Employment
+
   module EmploymentHistory
     class Repository
       
@@ -36,10 +37,14 @@ module Employment
       def self.get_uncovered_weeks_and_rate member_id 
       end
     end  #class
-  end  #module..
-end  # module..
+  end   
+
+end  
+
+
 
 module  Billing
+
   module Calendar 
 
     # class BillingPeriod
@@ -58,8 +63,6 @@ module  Billing
     # end
   end 
 
-
-
   module Rates
     class TieredRates
       def self.get_billing_tier_for company_id, member_id 
@@ -68,11 +71,22 @@ module  Billing
     end
 
 
+
+
     class RatesForWeeks
-      def self.get_rates_for_week_ending member_id, company_information_id ,weekending
+      def self.get_rates_for_week_ending member_id, company_information_id ,week_ending
         db = Connection.db_teamsters
 
-        sql = "select TierRate, CompanyInformationId, memberId, WeekEnding, Z.PlanHeaderId, LotTpdAndDeathAmount,
+        sql = "
+
+
+        select PlanCode, BillingTier = TierRate, CompanyInformationId, memberId, WeekEnding,  PlanHeaderId, Amount=Convert(Money,(Rate-LotTpdAndDeathAmount))
+        from  
+
+        (
+   
+
+            select TierRate, CompanyInformationId, memberId, WeekEnding, Z.PlanHeaderId, LotTpdAndDeathAmount,
               Rate = 
               case
                 when NumberOfBillingTiers = 0 Then MedicalRateComposite
@@ -210,7 +224,7 @@ module  Billing
           And  #{week_ending} between RateStartDate and RateEndDate
           group by PlanHeaderId
           ) Y on Z.PlanHeaderID = Y.PlanHeaderID
-
+      ) A 
 
         "
         File.open("test.sql", "a") do |f|
@@ -222,14 +236,15 @@ module  Billing
           record = {}
           record[:member_id] = row[:memberid]
           record[:company_information_id] = row[:companyinformationid]
-          record[:week_ending] = row[:weekending].to_date
-          record[:amount] = Money.new(row[:rate]) - Money.new(row[:lottpdanddeathamount])
+          record[:week_starting_date] = row[:weekending].to_date - 6
+          record[:amount] = Money.new(row[:netamount]) 
           results << record
         end
         results
       end
     end
   end
+
   module Periods
     class Repository
       def self.get_max_billing_period_for_member id 
@@ -264,10 +279,14 @@ module  Billing
       end 
     end
   end
+
 end
 
 
+
+
 module Eligibility
+
   module FreightBenefit
     class Repository
       def self.insert_changed_member_id member_id  
@@ -287,7 +306,7 @@ module Eligibility
       def self.freight_benefit member_id 
         sql = "select * from FreightBenefit WHERE member_id = ? "
 
-        
+
 
       end
 
@@ -297,36 +316,64 @@ module Eligibility
 
   module FreightAccumulation
     class Repository
-      
+
+      def self.reverse_fb_week entry, description
+        
+        db = Connection.db_teamsters
+        sql = " INSERT INTO FreightAccount (MemberId, CompanyInformationId, WeekStarting, Amount,    EntryType,   IsReversal, UserId, UserDate, Note, PlanCode ) VALUES (?, ?, ?, ?,  ?, ?, ?, ?, ?, ? ) "
+        
+ 
+        db[
+            sql, entry.member_id  , entry.company_information_id  , 
+            entry.week_starting_date   , (entry.amount.amount * -1), "#{FreightAccountEntry.coverage}" , 'Y', 'FreightBatch', 
+            Time.now, description , entry.plan_code
+          ].insert
+ 
+
+      end 
+
+
+
+
 
 
       def self.add additions  
+        
         db = Connection.db_teamsters
-        # db["DELETE FROM FreightAccount WHERE MemberId = ?", account.records.first[:member_id]].delete
-        sql = "INSERT INTO FreightAccount (MemberId, CompanyInformationId, WeekStarting, Amount,    EntryType, UserId, UserDate )
-        VALUES (?, ?, ?,   ?, ?, ?, ? ) "
+        sql = " INSERT INTO FreightAccount (MemberId, CompanyInformationId, WeekStarting, Amount, EntryType, IsReversal,  UserId, UserDate ) VALUES (?, ?, ?, ?,  ?, ?, ?, ? ) "
+         
+        additions.each do |entry|
+          db[
+              sql, entry.member_id  , entry.company_information_id  , entry.week_starting_date   , entry.amount.amount, "#{FreightAccountEntry.contribution}" , 'N', 'FreightBatch', Time.now 
+            ].insert
+        end
+      
+      end
+
+
+
+
+
+      def self.reverse deletions  
+        
+        db = Connection.db_teamsters
+        sql = " INSERT INTO FreightAccount (MemberId, CompanyInformationId, WeekStarting, Amount,    EntryType,   IsReversal, UserId, UserDate, Note ) VALUES (?, ?, ?, ?,  ?, ?, ?, ?, ? ) "
         
          
-          additions.each do |entry|
-            db[sql, entry.member_id  , entry.company_information_id  , entry.week_starting_date   , entry.amount.amount, 
-              'contribution' , 'FreightBatch', Time.now ].insert 
-          end
+        deletions.each do |entry|
+          db[
+              sql, entry.member_id  , entry.company_information_id  , entry.week_starting_date   , (entry.amount.amount * -1), "#{FreightAccountEntry.contribution}" , 
+              'Y', 'FreightBatch', Time.now, 'Removed because original entry replaced in billing data.' 
+            ].insert
+        end
         
       end
 
-      def self.reverse deletions  
-        db = Connection.db_teamsters
-        # db["DELETE FROM FreightAccount WHERE MemberId = ?", account.records.first[:member_id]].delete
-        sql = "INSERT INTO FreightAccount (MemberId, CompanyInformationId, WeekStarting, Amount,    EntryType, UserId, UserDate )
-        VALUES (?, ?, ?,   ?, ?, ?, ? ) "
-        
-         
-          deletions.each do |entry|
-            db[sql, entry.member_id  , entry.company_information_id  , entry.week_starting_date   , (entry.amount.amount * -1), 
-              'correction' , 'FreightBatch', Time.now ].insert 
-          end
-        
-      end
+
+
+
+
+
 
 
       def self.half_pay_from_bbs_2012 member_id
@@ -462,7 +509,7 @@ module Eligibility
 
   module Coverage
 
-    class UncoveredWeeks
+    class Repository
 
       def self.get_for_member member_id  , date_range 
         db = Connection.db_teamsters
@@ -484,6 +531,27 @@ module Eligibility
         end
         records 
       end
+
+
+      def self.get_covered_weeks member_id  , week_starting_dates
+        week_ending_dates = week_starting_dates.collect{|x| x.week_starting_date + 6 }
+        db = Connection.db_teamsters
+        sql = "select  
+                SELECT A.WeekEnding   
+                FROM BillingPeriodWeekEnds A 
+                INNER JOIN PCMACSCoverageHistory B ON A.WeekEnding BETWEEN B.FromDate AND B.ToDate
+                WHERE B.MemberId = ? AND DependentId = 0 AND   A.WeekEnding  in (?)
+                ORDER by 1 "
+
+
+        records = []
+          db.fetch(sql, member_id,  week_ending_dates.join(",")).each do |row|
+          records <<  row[:week_ending].to_date - 6 
+        end
+        records 
+      end
+
+
     end
   end
 
