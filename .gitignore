@@ -1,4 +1,5 @@
 *.gem
+*.pstore
 *.rbc
 /.config
 /coverage/
