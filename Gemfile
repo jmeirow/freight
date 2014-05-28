@@ -17,7 +17,6 @@ group :development do
   gem 'eventmachine'
   require 'rbconfig'
   gem 'wdm', '>= 0.1.0' if RbConfig::CONFIG['target_os'] =~ /mswin|mingw/i
-  # gem 'rb-notifu'
   gem 'pry'
   gem 'pry_debug'
 end
