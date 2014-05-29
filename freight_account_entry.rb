@@ -72,6 +72,12 @@ class FreightAccountEntry
     current_fb_week_starting_dates.each do |week_starting_date|  
       current_fb_entries << account_entries.select{|x| x.week_starting_date == week_starting_date }.last 
     end
+
+    puts ""
+    puts "#{ '=' * 80  }"
+    puts "current_fb_entries = #{pp current_fb_entries}"
+    puts "#{ '=' * 80  }"
+    puts ""
     current_fb_entries
   end
 

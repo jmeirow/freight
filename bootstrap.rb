@@ -50,78 +50,106 @@ end
 
 
 def create_adjustments_for_replaced_fb (member_id, account_entries)
+  
   current_fb_weeks = FreightAccountEntry.get_account_current_coverage_entries(account_entries)
+ 
+
   if current_fb_weeks.count > 0
-    covered_weeks = Eligibility::Coverage::Repository.get_covered_weeks(member_id, current_fb_weeks.collect{|x| x.week_starting_date})
-    covered_weeks.each {|entry| Eligibility::FreightAccumulation::Repository.reverse_fb_week entry, 
-                                'Account credited for FB that was later replaced with other coverage.'  }
+    covered_weeks = Eligibility::Coverage::Repository.get_covered_weeks(member_id)
+    reversed_weeks = current_fb_weeks.select{|x| covered_weeks.include?(x.week_starting_date)}
+
+    reversed_weeks.each do |week| 
+      entry = current_fb_weeks.select{|x| x.week_starting_date == week}.first
+
+
+      puts ""
+      puts "#{ '=' * 80  }"
+      puts "entry = #{pp entry}"
+      puts "#{ '=' * 80  }"
+      puts ""
+
+      Eligibility::FreightAccumulation::Repository.reverse_fb_week(entry, 'Account credited for FB that was later replaced with other coverage.')
+    end
   end  
 end
 
 
 def update_accounts
+  if (1..5).cover?Date.today.wday
+    puts "Updating accounts..."
+    Eligibility::FreightAccumulation::Repository.freight_member_ids.each do |member_id|
+    
 
-  Eligibility::FreightAccumulation::Repository.freight_member_ids.each do |member_id|
-  
-
-    #
-    # get base data
-    #
-    emp_stat_data =   Eligibility::FreightAccumulation::Repository.half_pay_from_bbs_2012(member_id)
-    emp_stat_data +=  Eligibility::FreightAccumulation::Repository.half_pay_weeks(member_id, half_pay_date_range)
-    account_entries = Eligibility::FreightAccumulation::Repository.get_freight_account(member_id) 
-
-
-    #
-    # compute account additions from daily rate contributions
-    #
-    additions = FreightAccountEntry.get_additions_for_account(emp_stat_data, account_entries)
+      #
+      # get base data
+      #
+      emp_stat_data =   Eligibility::FreightAccumulation::Repository.half_pay_from_bbs_2012(member_id)
+      emp_stat_data +=  Eligibility::FreightAccumulation::Repository.half_pay_weeks(member_id, half_pay_date_range)
+      account_entries = Eligibility::FreightAccumulation::Repository.get_freight_account(member_id) 
 
 
-    #
-    # add entries to account...
-    #
-    Eligibility::FreightAccumulation::Repository.add additions, FreightAccountEntry.contribution, 'N'
- 
-
-    #
-    # re-fetch the updated account data...
-    #
-    account_entries = Eligibility::FreightAccumulation::Repository.get_freight_account (member_id) 
+      #
+      # compute account additions from daily rate contributions
+      #
+      additions = FreightAccountEntry.get_additions_for_account(emp_stat_data, account_entries)
 
 
-    #
-    # compute reversals (correction) of daily rate contributions that have been deleted
-    #
-    deleted_weeks = FreightAccountEntry.get_deleted_weeks_for_account(emp_stat_data, account_entries)
-    deletions = deleted_weeks.collect{|week| account_entries.find{|x| x.week_starting_date == week && x.is_contribution? }}
-    Eligibility::FreightAccumulation::Repository.reverse (deletions)
- 
+      #
+      # add entries to account...
+      #
+      Eligibility::FreightAccumulation::Repository.add additions, FreightAccountEntry.contribution, 'N'
+   
+
+      #
+      # re-fetch the updated account data...
+      #
+      account_entries = Eligibility::FreightAccumulation::Repository.get_freight_account (member_id) 
 
 
-    #
-    # re-fetch the updated account data...
-    #
-    account_entries = Eligibility::FreightAccumulation::Repository.get_freight_account (member_id) 
+      #
+      # compute reversals (correction) of daily rate contributions that have been deleted
+      #
+      deleted_weeks = FreightAccountEntry.get_deleted_weeks_for_account(emp_stat_data, account_entries)
+      deletions = deleted_weeks.collect{|week| account_entries.find{|x| x.week_starting_date == week && x.is_contribution? }}
+      Eligibility::FreightAccumulation::Repository.reverse (deletions)
+   
 
 
-
-    #
-    # compute additions to account because previously created FB week(s) replaced by other coverage
-    #
-    # create_adjustments_for_replaced_fb(member_id, account_entries)
-    #
-    # account_entries = repo.get_freight_account (member_id) 
+      #
+      # re-fetch the updated account data...
+      #
+      account_entries = Eligibility::FreightAccumulation::Repository.get_freight_account (member_id) 
 
 
 
-    #
-    # compute adjustments to account because of tiered rate changes or retro plan change
-    #
-    # create_adjustments_when_amount_changes(member_id, account_entries) 
-    #
-    #
+
+
+
+
+      #
+      # compute additions to account because previously created FB week(s) replaced by other coverage
+      #
+      create_adjustments_for_replaced_fb(member_id, account_entries)
+      
+
+      #
+      # re-fetch the updated account data...
+      #
+      account_entries = Eligibility::FreightAccumulation::Repository.get_freight_account (member_id) 
+
+
+
+      #
+      # compute adjustments to account because of tiered rate changes or retro plan change
+      #
+      # create_adjustments_when_amount_changes(member_id, account_entries) 
+      #
+      #
+    end
+  else
+    puts "Today is a weekend. Not updating accounts."
   end
+
 end
 
 
@@ -146,8 +174,7 @@ end
 
 
 def time_to_create_statements?
-
-  return true
+  
 
   if statements_have_never_run_before? 
     return true if Date.today.day >= 20
@@ -179,25 +206,36 @@ end
 
 def create_statements_for(people_with_enough_money,statement_date)
 
-
-
-  repo = Eligibility::FreightAccumulation::Repository
-  benefit_repo = Eligibility::FreightBenefit::Repository
   people_with_enough_money.each do |record|
     new_record = record.merge(:user_date => Time.now,
                  :is_reversal => 'N',
                  :note => '')
 
-    new_record[:amount] = ( new_record[:amount]  )
 
-
-
-
+    #
+    # Insert to the statement
+    #
     FreightStatement.insert_freight_stmt_record new_record, statement_date
+    
 
-    #repo.add [FreightAccountEntry.new(new_record)], FreightAccountEntry.coverage, 'N'
-    #benefit_repo.add new_record[:member_id], new_record[:week_starting_date] + 6
+    #
+    # insert to the account
+    #
+    new_record[:amount] = Money.new(new_record[:amount].amount * -1)
+    Eligibility::FreightAccumulation::Repository.add_coverage_record FreightAccountEntry.new(new_record), FreightAccountEntry.coverage, 'N'
   end
+end
+
+
+def create_freight_benefit_records
+
+  # NEED TO REPLACE THIS WITH GETTING NON-REVERSED COVERAGE ROWS FROM THE ACCOUNT
+
+  FreightStatement.get_statements_for_date.each do |stmt|
+    Eligibility::FreightBenefit::Repository.add stmt[:member_id], stmt[:week_applied_end] 
+  end
+
+
 end
 
  
@@ -273,17 +311,10 @@ def add_to_collection_if_sufficient_balance member_id, results, gaps
 
   if (balance  >= rate_info[:amount] )
 
-    record =  {    
-                :member_id => member_id, 
-                :amount => rate_info[:amount], 
-                :plan_code => rate_info[:plan_code],  
-                :billing_tier => rate_info[:billing_tier], 
-                :company_information_id => company_information_id, 
-                :is_coverage_applied => 'N', 
-                :week_applied_start => nil, 
-                :week_applied_end => nil, 
-                :week_starting_date => week_ending_date -6
-              }
+    record =  {:member_id => member_id, :amount => rate_info[:amount], :plan_code => rate_info[:plan_code], :billing_tier => rate_info[:billing_tier], :company_information_id => company_information_id, :is_coverage_applied => 'N',
+                :week_applied_start => nil, :week_applied_end => nil, :week_starting_date => week_ending_date -6 }
+
+
     if gap
       record = record.merge({:week_applied_start => gap[:week_starting_date], :week_applied_end => week_ending_date, :is_coverage_applied => 'Y' }) 
     end
@@ -315,35 +346,47 @@ end
 
 def create_statements
 
-  #
-  # set the statement date to today (do this in case we run past midnight.  Don't used "Date.today" for long running batch processes.)
-  #
-  statement_datetime  = Time.now
-  statement_date      = Date.today 
+  if time_to_create_statements? == false
+    puts "Statements not created."
+  else 
+
+    puts "Creating statements..."
+
+    #
+    # set the statement date to today (do this in case we run past midnight.  Don't used "Date.today" for long running batch processes.)
+    #
+    statement_datetime  = Time.now
+    statement_date      = Date.today 
 
 
-  #
-  # create statements for those people for whom coverage was created. 
-  #
-  create_statements_for(people_with_sufficient_balances, statement_date )
-  
+    #
+    # create statements for those people for whom coverage was created. 
+    #
+    create_statements_for(people_with_sufficient_balances, statement_date )
+    
+
+
+    #
+    # (Re)Create freight benefit records. 
+    #
+    create_freight_benefit_records
 
 
 
-
-
-  #
-  # Since every one's FB data was wiped out at the start of the nightly batch we need to 
-  # insure their eligibility is recomputed.
-  #
-  request_elig_be_run_for_all_fb_members
+    #
+    # Since every one's FB data was wiped out at the start of the nightly batch we need to 
+    # insure their eligibility is recomputed.
+    #
+    request_elig_be_run_for_all_fb_members
 
 
 
-  #
-  # record this run date in pstore 
-  #
-  record_statement_date statement_datetime
+    #
+    # record this run date in pstore 
+    #
+    record_statement_date statement_datetime
+
+  end
 end
 
 
@@ -358,8 +401,8 @@ end
 #
 #
 def run
-  update_accounts if (1..5).cover?Date.today.wday
-  create_statements if time_to_create_statements?
+  update_accounts 
+  create_statements 
 end
 
 
@@ -383,16 +426,34 @@ def summary
 end
 
 
-def test opt 
-  time = Time.strptime(opt, "%m/%d/%Y %H:%M:%S %P")
-
+def test arg_time 
+  time = Time.strptime(arg_time, "%m/%d/%Y %H:%M:%S %P")
 
   if ENV['ENVIRONMENT'].nil? || (ENV['ENVIRONMENT'] != 'development' && ENV['ENVIRONMENT'] != 'test')
     puts "Unable to verify this machine is a 'dev' or 'test' machine. Quitting..."
   else   
-    puts "Running...as TEST mode using #{time}"
     Timecop.travel(  time  ) do 
       run
+    end
+  end
+end
+
+
+
+
+def test_x_days days
+
+  (1..days).each do |idx|
+
+    time = (Date.today + idx).to_time
+
+    puts "\n\nRunning for date:  #{time.to_date.strftime('%A   %m/%d/%Y')}"
+    if ENV['ENVIRONMENT'].nil? || (ENV['ENVIRONMENT'] != 'development' && ENV['ENVIRONMENT'] != 'test')
+      puts "Unable to verify this machine is a 'dev' or 'test' machine. Quitting..."
+    else   
+      Timecop.travel(  time  ) do 
+        run
+      end
     end
   end
 end
@@ -480,6 +541,9 @@ if cmd == 'run'
   elsif cmd == 'test'
     cmd_found = true
     test opt
+  elsif cmd == 'test_x_days'
+    cmd_found = true
+    test_x_days opt.to_i
   elsif cmd == 'summary'
     cmd_found = true
     summary 
