@@ -9,10 +9,10 @@ require 'pry'
 class FreightAccountEntry 
   include DataAccessObject 
 
-  attr_accessor :txn_id, :member_id,  :company_information_id, :week_starting_date, :amount, :entry_type,   :user_date, :plan_code, :is_reversal, :note 
+  attr_accessor :txn_id, :member_id,  :company_information_id, :billing_tier, :week_starting_date, :amount, :entry_type,   :user_date, :plan_code, :is_reversal, :note 
 
   def initialize attributes
-    fields =  [:txn_id, :member_id,  :company_information_id, :week_starting_date, :amount, :entry_type,   :user_date, :plan_code, :is_reversal, :note ]
+    fields =  [:txn_id, :member_id,  :company_information_id, :billing_tier, :week_starting_date, :amount, :entry_type,   :user_date, :plan_code, :is_reversal, :note ]
     populate  fields, attributes
   end
 
@@ -44,8 +44,6 @@ class FreightAccountEntry
   # CLASS METHODS THAT OPERATE ON COLLECTIONS OF INSTANCES
 
   def self.get_account_current_entry_weeks(account_entries)
-
-
     current_entry_weeks = []
     weeks = account_entries.collect {|x| x.week_starting_date}.sort.uniq
     weeks.each do |week|
@@ -57,13 +55,9 @@ class FreightAccountEntry
 
   def self.get_employer_id(account_entries)
     last_week = self.get_account_current_entry_weeks(account_entries).last
-    result = account_entries.find{|x|( x.week_starting_date == last_week) && (x.is_contribution?) && (x.is_reversal? == false) } 
+    result = account_entries.find{|x|( x.week_starting_date == last_week) && (x.is_contribution?) && (x.is_reversal?  == false) } 
     result.company_information_id
   end
-
-
-
-
 
 
   def self.get_account_current_coverage_entries(account_entries)

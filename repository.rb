@@ -6,7 +6,28 @@ require_relative './daily_rate_contribution.rb'
 require_relative './freight_account_entry.rb'
 
 
+module Util
+  def self.reset
+    if ENV['ENVIRONMENT'].nil? || (ENV['ENVIRONMENT'] != 'development' && ENV['ENVIRONMENT'] != 'test')
+      puts "Unable to verify this machine is a 'dev' or 'test' machine. Quitting..."
+    else 
+      db = Connection.db_teamsters
+      db["delete from FreightAccount"].delete 
+      db["delete from FreightBenefit"].delete
+      db["delete from FreightStatement"].delete
+      db["delete from ChangedMemberId where TableName = 'FreightBenefit'"].delete
+    end 
+  end
 
+  def self.log_sql sql, file_name
+    if ['development','test'].include?(ENV['environment'])
+      File.delete("tmp/#{file_name}")
+      File.open("tmp/#{file_name}", "a") do |f|
+        f.puts sql
+      end
+    end
+  end
+end
 
 module Reporting
 
@@ -87,9 +108,7 @@ module Employment
       end
     end   
   end   
-
 end  
-
 
 
 module  Billing
@@ -165,6 +184,8 @@ module  Billing
                   THEN 'Middle'  
                   WHEN ((SP.Spouse = 'N' AND KD.Kids = 'N') OR (SP.Spouse IS NULL AND KD.Kids IS NULL))  
                   THEN 'Single'  
+                  WHEN (VC.NumberOfBillingTiers = 0)
+                  THEN 'Composite'
                   END,  
              
                VC.CollAgreementEffectiveDate AS CBAEffectiveDate, VC.CollAgreementTerminationDate AS CBATerminationdate, VC.ContributionPlanID,   
@@ -274,19 +295,39 @@ module  Billing
       ) A 
 
         "
-        File.open("test.sql", "a") do |f|
-          f.puts sql
-        end
-          record = {}        
-          db.fetch(sql).each do |row| 
 
+        Util.log_sql sql, 'text.sql'
+
+        record = {}        
+        db.fetch(sql).each do |row| 
           record[:member_id] = row[:memberid]
+          record[:plan_code] = row[:plancode]
+          record[:billing_tier] = row[:billingtier]
           record[:company_information_id] = row[:companyinformationid]
           record[:week_starting_date] = row[:weekending].to_date - 6
           record[:amount] = Money.new(row[:amount]) 
         end
+
+
+        File.delete("tmp/debug1.txt")
+        File.open("tmp/debug1.txt", "a") do |f|
+          f.puts "#{ '=' * 80  }"  
+          f.puts "Date/Time: #{Time.now.strftime('%m/%d/%Y %H:%M:%S %P')} "
+          f.puts "#{ '-' * 80  }"
+          f.puts caller
+          f.puts ""
+          f.puts "#{ '-' * 80  }"
+          f.puts "record = #{record}"
+          f.puts "#{ '=' * 80  }"
+          f.puts ""
+        end
+        
+
+        
+
         record
       end
+
     end
 
   end
@@ -300,9 +341,9 @@ module  Billing
         from BillData bd
         INNER JOIN BillItem bi on bd.BillDataNumber = bi.BillDataNumber
         WHERE bi.MemberId = ?  and (Week1 = 'AC' OR Week2 = 'AC' OR Week3 = 'AC' OR Week4 = 'AC' OR ISNULL(Week5,'') = 'AC')"
-        File.open("dump.sql","a") do |f|
-          f.puts sql 
-        end
+        
+
+        Util.log_sql sql, 'get_max_billing_period_for_member.sql'
 
         result = Date.today
         db.fetch(sql,id).each do |row| 
@@ -325,10 +366,54 @@ module  Billing
       end 
     end
   end
-
 end
 
 
+module FreightStatement
+
+  def self.insert_freight_stmt_record data , statement_date
+    db = Connection.db_teamsters
+    sql = "
+        INSERT INTO FreightStatement ( MemberId, FirstName,LastName,Address1,Address2,City,State,PostalCode,EmployerName,AmountRequiredForCoverage,PlanCode,BillingTier, StatementDate, WeekAppliedStart, WeekAppliedEnd, IsCoverageApplied  ) 
+        SELECT mbr.MemberId, MemberFirstName, MemberLastName, MemberAddress1, MemberAddress2, MemberCity, MemberState, MemberZipCode, cin.CompanyName, ? , '#{data[:plan_code]}', '#{data[:billing_tier]}',  ?,?,?, '#{data[:is_coverage_applied]}'
+
+        FROM 
+        Memberdemographic mbr
+        INNER JOIN CompanyMember cm on cm.MemberId = mbr.MemberID
+        INNER JOIN CompanyInformationNew cin on cm.CompanyInformationId = cin.CompanyInformationId
+        WHERE mbr.MemberId = #{data[:member_id]} and cin.CompanyInformationId = #{data[:company_information_id]}
+    "
+
+    Util.log_sql sql, 'insert_freight_stmt_record.sql'
+
+
+    db[sql, data[:amount].amount,  statement_date,  data[:week_applied_start],  data[:week_applied_end] ].insert 
+  end
+
+
+  def self.get_statements_for_date statement_date 
+    db = Connection.db_teamsters
+
+    sql = "  
+
+      select *
+      from FreightStatement  
+      where StatementDate = ?
+      
+    "
+    records = []
+    db.fetch(sql, statement_date).each do |row|
+      hash = Hash.new
+      hash[:member_id] = row[:memberid]
+      hash[:week_starting_date] = row[:weekstarting].to_date
+      hash[:company_information_id] = row[:companyinformationid]
+      hash[:user_date] =  row[:weekstarting].to_date
+      hash[:amount] = Money.new(34.00)
+      records << DailyRateContribution.new(hash)   
+    end
+    records    
+  end
+end
 
 
 module Eligibility
@@ -340,6 +425,20 @@ module Eligibility
         sql = "INSERT INTO ChangedMemberId ( MemberID, TableName, ActionCd  ) VALUES (?, 'BasicEligibilityMembers', 'U'  ) "
         db[sql, member_id ].insert 
       end
+
+
+      def self.insert_into_changed_member_id member_id 
+        db = Connection.db_teamsters
+        sql = "
+          insert into ChangedMemberId (MemberId, TableName, ActionCd, ProcessStatus, UserDate) 
+          values (#{member_id},'FreightBenefit','I',0, ?)
+        "
+        Util.log_sql sql, 'insert_into_changed_member_id.sql'
+
+        db[sql, Time.now].insert
+      end
+
+
 
       def self.add member_id, week_ending_date
         db = Connection.db_teamsters
@@ -378,13 +477,13 @@ module Eligibility
       end 
 
 
-      def self.add additions, entry_type  
+      def self.add additions, entry_type, is_reversal  
         db = Connection.db_teamsters
         sql = " INSERT INTO FreightAccount (MemberId, CompanyInformationId, WeekStarting, Amount, EntryType, IsReversal,  UserId, UserDate ) VALUES (?, ?, ?, ?,  ?, ?, ?, ? ) "
         
         additions.each do |entry|
 
-          db[sql, entry.member_id, entry.company_information_id, entry.week_starting_date, entry.amount.amount, entry_type , 'N', 'FreightBatch', Time.now ].insert
+          db[sql, entry.member_id, entry.company_information_id, entry.week_starting_date, entry.amount.amount, entry_type ,  is_reversal , 'FreightBatch', Time.now ].insert
         end
       end
 
@@ -458,8 +557,9 @@ module Eligibility
 
     
       def self.get_freight_account member_id 
+
         db = Connection.db_teamsters
-        sql = "SELECT  TxnId, MemberId , CompanyInformationId , WeekStarting ,Amount , EntryType, UserDate   
+        sql = "SELECT  TxnId, MemberId , CompanyInformationId , IsReversal, BillingTier, WeekStarting ,Amount , EntryType, UserDate, UserId, Note, PlanCode   
         from FreightAccount where MemberID = ?"
         records = []
         db.fetch(sql, member_id).each do |row|
@@ -468,11 +568,16 @@ module Eligibility
           hash[:member_id] = row[:memberid]
           hash[:week_starting_date] = row[:weekstarting].to_date
           hash[:company_information_id] = row[:companyinformationid]
-          hash[:user_date] = row[:userdate].to_date
           hash[:entry_type] =  row[:entrytype]
           hash[:amount] = Money.new(row[:amount])
+          hash[:billing_tier] = row[:billingtier]
+          hash[:is_reversal] = row[:isreversal]
+          hash[:user_date] = row[:userdate]
+          hash[:plan_code] = row[:plancode]
+          hash[:note] = row[:note]
           records << FreightAccountEntry.new(hash)        
         end
+
         records
       end
 
@@ -599,7 +704,6 @@ module Eligibility
 
     end
   end
-
 end
 
 
@@ -610,3 +714,6 @@ class Connection
   end
 end
  
+
+
+
