@@ -730,8 +730,7 @@ end
 
 class Connection
   def self.db_teamsters
-    Sequel.ado(:conn_string=>"Provider=SQLNCLI11;Server=#{ENV['DB_SERVER']};Database=#{ENV['DB_NAME']};Uid=#{ENV['DB_USER']}; Pwd=#{ENV['DB_PASSWORD']};")
-    # Sequel.ado(:conn_string=>"Server=#{ENV['DB_SERVER']};Database=#{ENV['DB_NAME']};User Id=#{ENV['DB_USER']}; Password=#{ENV['DB_PASSWORD']};")
+    Sequel.ado(:conn_string=>"Provider=SQLNCLI10;Server=#{ENV['DB_SERVER']};Database=#{ENV['DB_NAME']};Uid=#{ENV['DB_USER']}; Pwd=#{ENV['DB_PASSWORD']};Trusted_Connection=no")
   end
 end
  
