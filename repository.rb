@@ -4,6 +4,7 @@ require 'pp'
 require './money'
 require_relative './daily_rate_contribution.rb'
 require_relative './freight_account_entry.rb'
+require_relative './allocation_periods.rb'
 
 
 module Util
@@ -21,10 +22,12 @@ module Util
   end
 
   def self.log_sql sql, file_name
-    if ['development','test'].include?(ENV['environment'])
-      File.delete("tmp/#{file_name}")
-      File.open("tmp/#{file_name}", "a") do |f|
-        f.puts sql
+    if ENV['log_sql'] == 'Y' 
+      if ['development','test'].include?(ENV['environment'])
+        File.delete("tmp/#{file_name}")
+        File.open("tmp/#{file_name}", "a") do |f|
+          f.puts sql
+        end
       end
     end
   end
@@ -458,12 +461,11 @@ module Eligibility
       def self.reverse_fb_week entry, description
 
         db = Connection.db_teamsters
-        sql = " INSERT INTO FreightAccount (MemberId, CompanyInformationId, WeekStarting, Amount,    EntryType,   IsReversal, UserId, UserDate, Note, PlanCode ) VALUES (?, ?, ?, ?,  ?, ?, ?, ?, ?, ? ) "
-        db
-        [
-          sql, entry.member_id  , entry.company_information_id  , 
+        sql = " INSERT INTO FreightAccount (MemberId, CompanyInformationId, WeekStarting, Amount,    EntryType, IsReversal, UserId, UserDate, Note, PlanCode, BillingTier ) 
+        VALUES (?, ?, ?, ?,  ?, ?, ?, ?, ?, ?, ? ) "
+        db [sql, entry.member_id  , entry.company_information_id  ,
           entry.week_starting_date   , (entry.amount.amount * -1), "#{FreightAccountEntry.coverage}" , 'Y', 'FreightBatch', 
-          Time.now, description , entry.plan_code
+          Time.now, description , entry.plan_code, entry.billing_tier
         ].insert
       end 
 
@@ -574,12 +576,37 @@ module Eligibility
           hash[:user_date] = row[:userdate]
           hash[:plan_code] = row[:plancode]
           hash[:note] = row[:note]
-          records << FreightAccountEntry.new(hash)        
+          records << FreightAccountEntry.new(hash)  if( current_allocation_period.cover? hash[:week_starting_date])       
         end
 
         records
       end
 
+
+      def self.get_all_freight_account member_id 
+
+        db = Connection.db_teamsters
+        sql = "SELECT  TxnId, MemberId , CompanyInformationId , IsReversal, BillingTier, WeekStarting ,Amount , EntryType, UserDate, UserId, Note, PlanCode   
+        from FreightAccount where MemberID = ?"
+        records = []
+        db.fetch(sql, member_id).each do |row|
+          hash = Hash.new
+          hash[:txn_id] = row[:txnid]
+          hash[:member_id] = row[:memberid]
+          hash[:week_starting_date] = row[:weekstarting].to_date
+          hash[:company_information_id] = row[:companyinformationid]
+          hash[:entry_type] =  row[:entrytype]
+          hash[:amount] = Money.new(row[:amount])
+          hash[:billing_tier] = row[:billingtier]
+          hash[:is_reversal] = row[:isreversal]
+          hash[:user_date] = row[:userdate]
+          hash[:plan_code] = row[:plancode]
+          hash[:note] = row[:note]
+          records << FreightAccountEntry.new(hash)       
+        end
+
+        records
+      end
 
       def self.freight_member_ids
         db = Connection.db_teamsters
@@ -703,7 +730,8 @@ end
 
 class Connection
   def self.db_teamsters
-    Sequel.ado(:conn_string=>"Provider=SQLNCLI11;Server=localhost;Database=Teamsters;Uid=dbuser; Pwd=dbuser123;")
+    Sequel.ado(:conn_string=>"Provider=SQLNCLI11;Server=#{ENV['DB_SERVER']};Database=#{ENV['DB_NAME']};Uid=#{ENV['DB_USER']}; Pwd=#{ENV['DB_PASSWORD']};")
+    # Sequel.ado(:conn_string=>"Server=#{ENV['DB_SERVER']};Database=#{ENV['DB_NAME']};User Id=#{ENV['DB_USER']}; Password=#{ENV['DB_PASSWORD']};")
   end
 end
  

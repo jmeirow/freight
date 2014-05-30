@@ -57,17 +57,7 @@ def create_adjustments_for_replaced_fb (member_id, account_entries)
   if current_fb_weeks.count > 0
     covered_weeks = Eligibility::Coverage::Repository.get_covered_weeks(member_id)
     reversed_weeks = current_fb_weeks.select{|x| covered_weeks.include?(x.week_starting_date)}
-
-    reversed_weeks.each do |week| 
-      entry = current_fb_weeks.select{|x| x.week_starting_date == week}.first
-
-
-      puts ""
-      puts "#{ '=' * 80  }"
-      puts "entry = #{pp entry}"
-      puts "#{ '=' * 80  }"
-      puts ""
-
+    reversed_weeks.each do |entry| 
       Eligibility::FreightAccumulation::Repository.reverse_fb_week(entry, 'Account credited for FB that was later replaced with other coverage.')
     end
   end  
@@ -83,8 +73,16 @@ def update_accounts
       #
       # get base data
       #
-      emp_stat_data =   Eligibility::FreightAccumulation::Repository.half_pay_from_bbs_2012(member_id)
-      emp_stat_data +=  Eligibility::FreightAccumulation::Repository.half_pay_weeks(member_id, half_pay_date_range)
+      emp_stat_data =nil 
+
+      if first_allocation_period.cover?Date.today 
+        emp_stat_data =   Eligibility::FreightAccumulation::Repository.half_pay_from_bbs_2012(member_id)
+        emp_stat_data +=  Eligibility::FreightAccumulation::Repository.half_pay_weeks(member_id, half_pay_date_range)
+      else
+        emp_stat_data = Eligibility::FreightAccumulation::Repository.half_pay_weeks(member_id, current_allocation_period)
+      end
+
+
       account_entries = Eligibility::FreightAccumulation::Repository.get_freight_account(member_id) 
 
 
@@ -178,10 +176,11 @@ def time_to_create_statements?
 
   if statements_have_never_run_before? 
     return true if Date.today.day >= 20
-  else 
+  else
+    return true if Date.today.day == 20
     return true if  Date.today.day >= 20 && 
-                    consecutive_months?(Date.today,last_statement_run_date) &&
-                    current_allocation_period.cover?(Date.today) && current_allocation_period.cover?(Date.today+30)
+        consecutive_months?(Date.today,last_statement_run_date) &&
+        current_allocation_period.cover?(Date.today) && current_allocation_period.cover?(Date.today+30)
   end
   false
 end
@@ -229,13 +228,16 @@ end
 
 def create_freight_benefit_records
 
-  # NEED TO REPLACE THIS WITH GETTING NON-REVERSED COVERAGE ROWS FROM THE ACCOUNT
+  Eligibility::FreightAccumulation::Repository.freight_member_ids.each do |member_id|
+    account_entries =  Eligibility::FreightAccumulation::Repository.get_all_freight_account member_id
+    coverage_entries = FreightAccountEntry.get_account_current_coverage_entries(account_entries)
 
-  FreightStatement.get_statements_for_date.each do |stmt|
-    Eligibility::FreightBenefit::Repository.add stmt[:member_id], stmt[:week_applied_end] 
+    if coverage_entries.count > 0
+      coverage_entries.each do |entry|
+        Eligibility::FreightBenefit::Repository.save entry.member_id, coverage_entries.collect{|x| x.week_starting_date + 6 }
+      end
+    end
   end
-
-
 end
 
  
@@ -279,7 +281,7 @@ end
 
 def last_coverage_entry_in_account(member_id)
   repo = Eligibility::FreightAccumulation::Repository
-  account_entries = repo.get_freight_account (member_id) 
+  account_entries = Eligibility::FreightAccumulation::Repository.get_freight_account (member_id) 
   account_entries.sort{|x,y| x.user_date <=> y.user_date}
                                 .select{|x| (x.is_reversal? == false) && (x.is_coverage?)}.last 
 end
@@ -304,10 +306,11 @@ def add_to_collection_if_sufficient_balance member_id, results, gaps
   end
 
   account_entries = Eligibility::FreightAccumulation::Repository.get_freight_account(member_id)
+  return if account_entries.count == 0
+
   balance = FreightAccountEntry.balance(account_entries)
   company_information_id = FreightAccountEntry.get_employer_id(account_entries)
   rate_info = Billing::Rates::RatesForWeeks.get_rates_for_week_ending(member_id, company_information_id ,week_ending_date)
-  
 
   if (balance  >= rate_info[:amount] )
 
@@ -401,10 +404,10 @@ end
 #
 #
 def run
+  puts "Called with time of #{Time.now.strftime("%m/%d/%Y %H:%M:%S %P")}"
   update_accounts 
   create_statements 
 end
-
 
 def summary 
   puts "Retrieving Info...."
@@ -439,8 +442,6 @@ def test arg_time
 end
 
 
-
-
 def test_x_days days
 
   (1..days).each do |idx|
@@ -451,13 +452,37 @@ def test_x_days days
     if ENV['ENVIRONMENT'].nil? || (ENV['ENVIRONMENT'] != 'development' && ENV['ENVIRONMENT'] != 'test')
       puts "Unable to verify this machine is a 'dev' or 'test' machine. Quitting..."
     else   
-      Timecop.travel(  time  ) do 
+      Timecop.travel(  time  ) do
+        Eligibility::FreightBenefit::Repository.delete_all 
         run
       end
     end
   end
 end
 
+
+def test_statements months
+
+  date = Date.new(2014,5,15)
+  puts "TODAY is #{Date.today}"
+  (0..months).each do |idx|
+
+    time  = date.next_statement_date.to_time
+    
+    if ENV['ENVIRONMENT'].nil? || (ENV['ENVIRONMENT'] != 'development' && ENV['ENVIRONMENT'] != 'test')
+      puts "Unable to verify this machine is a 'dev' or 'test' machine. Quitting..."
+    else   
+      Timecop.travel(  time  ) do
+        Eligibility::FreightBenefit::Repository.delete_all
+        puts "\n\nRunning for date:  #{time.to_date.strftime('%A   %m/%d/%Y')}" 
+        run
+      end
+    end
+  
+    date = time.to_date 
+
+  end
+end
 
 def balances
   puts "Retrieving Balances...."
@@ -541,6 +566,9 @@ if cmd == 'run'
   elsif cmd == 'test'
     cmd_found = true
     test opt
+  elsif cmd == 'test_statements'
+    cmd_found = true
+    test_statements opt.to_i
   elsif cmd == 'test_x_days'
     cmd_found = true
     test_x_days opt.to_i

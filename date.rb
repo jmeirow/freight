@@ -14,6 +14,12 @@ class Date
     self - self.wday
   end
 
+  def next_statement_date
+    x_wday = 20
+    x_month =  (self.month == 12)  ?  1               : (self.month + 1 )
+    x_year =   (self.month == 12)  ?  (self.year + 1) : self.year 
+    Date.new(x_year,x_month,x_wday)
+  end
 
   def mctwf_next_months_weeks
     dt = mctwf_last_saturday_of_month + 1
@@ -29,7 +35,11 @@ class Date
   end
 
 
+  def mctwf_first_saturday_of_next_month
+     mctwf_last_saturday_of_month + 7
+  end
   
+
   def mctwf_saturday_of_week
     return self if self.wday == 6
     self + (6 - self.wday)

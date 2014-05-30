@@ -1,5 +1,6 @@
 require_relative './data_access_object.rb'
 require_relative './money.rb'
+require_relative './allocation_periods.rb'
 
 require 'pry'
 
@@ -8,6 +9,7 @@ require 'pry'
 
 class FreightAccountEntry 
   include DataAccessObject 
+  include AllocationPeriods
 
   attr_accessor :txn_id, :member_id,  :company_information_id, :billing_tier, :week_starting_date, :amount, :entry_type,   :user_date, :plan_code, :is_reversal, :note 
 
@@ -54,8 +56,15 @@ class FreightAccountEntry
 
 
   def self.get_employer_id(account_entries)
+
     last_week = self.get_account_current_entry_weeks(account_entries).last
+
+
+
     result = account_entries.find{|x|( x.week_starting_date == last_week) && (x.is_contribution?) && (x.is_reversal?  == false) } 
+
+
+
     result.company_information_id
   end
 
@@ -73,11 +82,6 @@ class FreightAccountEntry
       current_fb_entries << account_entries.select{|x| x.week_starting_date == week_starting_date }.last 
     end
 
-    puts ""
-    puts "#{ '=' * 80  }"
-    puts "current_fb_entries = #{pp current_fb_entries}"
-    puts "#{ '=' * 80  }"
-    puts ""
     current_fb_entries
   end
 
@@ -104,7 +108,7 @@ class FreightAccountEntry
   def self.balance account_entries
     sum = Money.new(0.00)
     account_entries.each do |entry| 
-      sum = sum + entry.amount
+      sum = sum + entry.amount if( current_allocation_period.cover? entry.week_starting_date) 
     end
     sum
   end

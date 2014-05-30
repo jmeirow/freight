@@ -15,6 +15,10 @@ module AllocationPeriods
     ]
 
 
+  def first_allocation_period
+     Date.new(2012,4, 1)..Date.new(2015,3,28)
+  end
+  
   def half_pay_date_range
     if ALLOCATION_PERIODS.first.cover? Date.today
       FREIGHT_ACCUM_START_DATE..ALLOCATION_PERIODS.first.last 
