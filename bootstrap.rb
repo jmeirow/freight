@@ -6,8 +6,7 @@ require 'pp'
 require 'timecop'
 require 'pstore'
 
-require 'pry'
-require 'pry_debug'
+
 
 
 FREIGHT_PSTORE = 'freight.pstore'
