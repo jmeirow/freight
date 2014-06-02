@@ -6,8 +6,6 @@ require 'pp'
 require 'timecop'
 require 'pstore'
 
- 
-
 
 FREIGHT_PSTORE = 'freight.pstore'
 PSTORE_LAST_RUN = 'last_run_date'
@@ -25,6 +23,7 @@ end
 
 
 def scratch
+
   # experimemtal code goes here....
 end
 
@@ -146,7 +145,6 @@ def update_accounts
   else
     puts "Today is a weekend. Not updating accounts."
   end
-
 end
 
 
@@ -199,7 +197,6 @@ def people_with_coverage_gap_next_month
   end
   people_with_gaps
 end 
-
 
 
 def create_statements_for(people_with_enough_money,statement_date)
@@ -323,7 +320,6 @@ def add_to_collection_if_sufficient_balance member_id, results, gaps
 
     results << record 
   end
-
 end
 
 
@@ -390,8 +386,6 @@ def create_statements
 
   end
 end
-
-
 
 
 
