@@ -2,21 +2,13 @@ require_relative './data_access_object.rb'
 require_relative './money.rb'
 require_relative './allocation_periods.rb'
 
- 
-
-
-
-class FreightAccountEntry 
-  include DataAccessObject 
+class FreightAccountEntry  < DataAccessObject 
   include AllocationPeriods
 
-  attr_accessor :txn_id, :member_id,  :company_information_id, :billing_tier, :week_starting_date, :amount, :entry_type,   :user_date, :plan_code, :is_reversal, :note 
-
-  def initialize attributes
-    fields =  [:txn_id, :member_id,  :company_information_id, :billing_tier, :week_starting_date, :amount, :entry_type,   :user_date, :plan_code, :is_reversal, :note ]
-    populate  fields, attributes
+  def set_fields
+    @fields = [ :txn_id, :member_id,  :company_information_id, :billing_tier, :week_starting_date, :amount, 
+      :entry_type,   :user_date, :plan_code, :is_reversal, :note ]
   end
-
 
   def is_contribution?
     entry_type == 'contribution'

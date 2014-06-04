@@ -5,6 +5,7 @@ require './money'
 require_relative './daily_rate_contribution.rb'
 require_relative './freight_account_entry.rb'
 require_relative './allocation_periods.rb'
+require_relative './bookmark.rb'
 
 
 module Util
@@ -23,7 +24,7 @@ module Util
 
   def self.log_sql sql, file_name
     if ENV['log_sql'] == 'Y' 
-      if ['development','test'].include?(ENV['environment'])
+      if ['development','test'].include?(ENV['ENVIRONMENT'])
         File.delete("tmp/#{file_name}")
         File.open("tmp/#{file_name}", "a") do |f|
           f.puts sql
@@ -458,6 +459,57 @@ module Eligibility
   module FreightAccumulation
     class Repository
 
+
+      def self.get_bookmarks
+        db = Connection.db_teamsters
+
+        sql = "select * from FreightBookmarks "
+
+
+        records = []
+        db.fetch(sql   ).each do |row|
+          hash = Hash.new
+          hash[:member_id] = row[:memberid]
+          hash[:has_enough_money] = row[:hasenoughmoney] 
+          hash[:statement_created] = row[:statementcreated]
+          if row[:sufficientbalancedate].nil?
+            hash[:sufficient_balance_date] =  nil
+          else
+            hash[:sufficient_balance_date] =  row[:sufficientbalancedate].to_date
+          end
+          records << Bookmark.load(hash)   
+        end
+        records
+      end
+
+
+
+
+
+
+      def self.save_bookmarks bookmarks 
+
+        db = Connection.db_teamsters
+        bookmarks.each do |bookmark|
+          if bookmark.insert?
+            sql = "INSERT INTO FreightBookmarks ( MemberID, HasEnoughMoney, StatementCreated, SufficientBalanceDate  ) VALUES (?, ?, ?, ? ) "
+            # sql = "INSERT INTO FreightBookmarks ( MemberID, HasEnoughMoney, StatementCreated, SufficientBalanceDate  ) 
+            # VALUES (  #{ bookmark.member_id}, 
+            #           #{bookmark.has_enough_money   ? 1 : 0}, 
+            #           #{bookmark.statement_created  ? 1 : 0}, 
+            #           #{self.format_sql_nullable_date(bookmark.sufficient_balance_date)} ) "
+            # puts sql
+            # db[sql].insert 
+
+             db[sql,   bookmark.member_id, bookmark.has_enough_money   ? 1 : 0,  bookmark.statement_created ? 1 : 0,  bookmark.sufficient_balance_date ].insert
+          else
+            sql = "Update FreightBookmarks set HasEnoughMoney = ?, StatementCreated =? , SufficientBalanceDate = ?  where MemberId = ?"
+            db[sql,    bookmark.has_enough_money   ? 1 : 0,  bookmark.statement_created ? 1 : 0,  bookmark.sufficient_balance_date ,  bookmark.member_id ].update
+          end
+        end
+      end
+
+
       def self.reverse_fb_week entry, description
 
         db = Connection.db_teamsters
@@ -525,7 +577,7 @@ module Eligibility
           hash[:company_information_id] = row[:companyinformationid]
           hash[:user_date] =  row[:weekstarting].to_date
           hash[:amount] = Money.new(34.00)
-          records << DailyRateContribution.new(hash)   
+          records << DailyRateContribution.load(hash)   
         end
         records
       end
@@ -551,7 +603,7 @@ module Eligibility
           hash[:user_date] =  row[:weekstarting].to_date
           hash[:company_information_id] = row[:companyinformationid]
           hash[:amount] = Money.new(34.00)
-          records << DailyRateContribution.new(hash)            
+          records << DailyRateContribution.load(hash)            
         end
         records
       end
@@ -576,7 +628,7 @@ module Eligibility
           hash[:user_date] = row[:userdate]
           hash[:plan_code] = row[:plancode]
           hash[:note] = row[:note]
-          records << FreightAccountEntry.new(hash)  if( current_allocation_period.cover? hash[:week_starting_date])       
+          records << FreightAccountEntry.load(hash)  if( current_allocation_period.cover? hash[:week_starting_date])       
         end
 
         records
@@ -602,7 +654,7 @@ module Eligibility
           hash[:user_date] = row[:userdate]
           hash[:plan_code] = row[:plancode]
           hash[:note] = row[:note]
-          records << FreightAccountEntry.new(hash)       
+          records << FreightAccountEntry.load(hash)       
         end
 
         records
@@ -638,6 +690,7 @@ module Eligibility
               "
 
         records = []
+        Util.log_sql(sql, "xxxxx")
         db.fetch(sql).each do |row|
           records <<  row[:memberid] 
         end

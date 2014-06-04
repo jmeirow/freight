@@ -10,6 +10,8 @@ require 'pstore'
 FREIGHT_PSTORE = 'freight.pstore'
 PSTORE_LAST_RUN = 'last_run_date'
 
+BOOKMARKS = Eligibility::FreightAccumulation::Repository.get_bookmarks 
+
 
 class Object
   def safe_value 
@@ -134,18 +136,38 @@ def update_accounts
       account_entries = Eligibility::FreightAccumulation::Repository.get_freight_account (member_id) 
 
 
+      #
+      # create - update bookmark
+      #
+      
+      bookmark = get_bookmark(member_id)
 
-      #
-      # compute adjustments to account because of tiered rate changes or retro plan change
-      #
-      # create_adjustments_when_amount_changes(member_id, account_entries) 
-      #
-      #
+      if enough_for_coverage?(member_id, Date.today.mctwf_saturday_of_week)
+        bookmark.has_enough_money = true
+        # bookmark.sufficient_balance_date = Date.today.mctwf_saturday_of_week unless (bookmark.sufficient_balance_date.nil? == false)
+      else
+        bookmark.has_enough_money = false
+        # bookmark.sufficient_balance_date = nil
+      end
+
+
+
     end
   else
     puts "Today is a weekend. Not updating accounts."
   end
+  Eligibility::FreightAccumulation::Repository.save_bookmarks(BOOKMARKS.select{|bookmark | bookmark.dirty? } )
 end
+
+
+
+def get_bookmark member_id
+  bookmark = BOOKMARKS.find{|x| x.member_id == member_id} || Bookmark.load_new(   member_id:member_id, enough_money:false, statement_created:false, sufficient_balance_date:nil )
+  BOOKMARKS << bookmark if bookmark.dirty?
+  bookmark
+end
+
+
 
 
 def statements_have_never_run_before?
@@ -183,6 +205,9 @@ def time_to_create_statements?
 end
 
 
+#
+# change name to people_with_gap_in_weeks_following_statement
+#  
 def people_with_coverage_gap_next_month
   people_with_gaps = []
   repo = Eligibility::FreightAccumulation::Repository
@@ -287,6 +312,20 @@ def has_coverage_entry_in_account?(member_id)
   
   last_coverage_entry_in_account(member_id).nil? == false 
 end
+
+
+def enough_for_coverage? member_id, week_ending_date 
+
+  account_entries = Eligibility::FreightAccumulation::Repository.get_freight_account(member_id)
+  return false if account_entries.count == 0
+
+  balance = FreightAccountEntry.balance(account_entries)
+  company_information_id = FreightAccountEntry.get_employer_id(account_entries)
+  rate_info = Billing::Rates::RatesForWeeks.get_rates_for_week_ending(member_id, company_information_id ,week_ending_date)
+
+  (balance  >= rate_info[:amount] )
+end
+
 
 
 def add_to_collection_if_sufficient_balance member_id, results, gaps 
@@ -399,7 +438,7 @@ end
 def run
   puts "Called with time of #{Time.now.strftime("%m/%d/%Y %H:%M:%S %P")}"
   update_accounts 
-  create_statements 
+  # create_statements 
 end
 
 def summary 
@@ -539,12 +578,10 @@ end
 
 
 #
-#
-#
 # Entry point
 #
-#
-#
+
+require_relative './bookmark.rb'
 
 include AllocationPeriods
 
@@ -581,5 +618,7 @@ if cmd == 'run'
     cmd_found = true
     reset
 end
+
+
  
 puts "\nCommand not recognized.\n" unless cmd_found 
