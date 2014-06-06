@@ -61,18 +61,22 @@ class FreightAccountEntry  < DataAccessObject
 
 
   def self.get_account_current_coverage_entries(account_entries)
+
+
+
+
     current_fb_week_starting_dates = []
     current_fb_entries = []
 
     weeks = account_entries.collect {|x| x.week_starting_date}.sort.uniq
+
     weeks.each do |week|
-      current_fb_week_starting_dates << week if account_entries.select{|x| (x.week_starting_date == week  && (x.is_coverage?)) }.count.odd?
+      current_fb_week_starting_dates << week if (account_entries.select{|x| (x.week_starting_date == week  && (x.is_coverage?)) }.count.odd?)
     end
 
     current_fb_week_starting_dates.each do |week_starting_date|  
       current_fb_entries << account_entries.select{|x| x.week_starting_date == week_starting_date }.last 
     end
-
     current_fb_entries
   end
 
@@ -99,7 +103,7 @@ class FreightAccountEntry  < DataAccessObject
   def self.balance account_entries
     sum = Money.new(0.00)
     account_entries.each do |entry| 
-      sum = sum + entry.amount if( current_allocation_period.cover? entry.week_starting_date) 
+      sum = sum + entry.amount if (current_allocation_period.cover? entry.week_starting_date) 
     end
     sum
   end

@@ -6,6 +6,10 @@ require 'pp'
 require 'timecop'
 require 'pstore'
 
+require 'pry'
+require 'pry_debug'
+
+
 
 FREIGHT_PSTORE = 'freight.pstore'
 PSTORE_LAST_RUN = 'last_run_date'
@@ -120,10 +124,6 @@ def update_accounts
 
 
 
-
-
-
-
       #
       # compute additions to account because previously created FB week(s) replaced by other coverage
       #
@@ -144,12 +144,12 @@ def update_accounts
 
       if enough_for_coverage?(member_id, Date.today.mctwf_saturday_of_week)
         bookmark.has_enough_money = true
-        # bookmark.sufficient_balance_date = Date.today.mctwf_saturday_of_week unless (bookmark.sufficient_balance_date.nil? == false)
       else
         bookmark.has_enough_money = false
-        # bookmark.sufficient_balance_date = nil
+        bookmark.date_initial_statement_created = nil
       end
-
+ 
+       create_freight_benefit_records member_id
 
 
     end
@@ -160,14 +160,11 @@ def update_accounts
 end
 
 
-
 def get_bookmark member_id
   bookmark = BOOKMARKS.find{|x| x.member_id == member_id} || Bookmark.load_new(   member_id:member_id, enough_money:false, statement_created:false, sufficient_balance_date:nil )
   BOOKMARKS << bookmark if bookmark.dirty?
   bookmark
 end
-
-
 
 
 def statements_have_never_run_before?
@@ -204,61 +201,39 @@ def time_to_create_statements?
   false
 end
 
+ 
+def get_uncovered_weeks_between member_id, week_starting_date, week_ending_date
 
-#
-# change name to people_with_gap_in_weeks_following_statement
-#  
-def people_with_coverage_gap_next_month
-  people_with_gaps = []
-  repo = Eligibility::FreightAccumulation::Repository
-  elig_repo = Eligibility::Coverage::Repository 
-  repo.freight_member_ids.each do |member_id|
-    Date.today.mctwf_next_months_weeks.each do |week_starting_date|
-      if elig_repo.is_covered?(member_id, week_starting_date) == false
-        people_with_gaps << {:member_id => member_id, :week_starting_date => week_starting_date}
-        break
-      end
-    end
+  week_starting_date = week_starting_date.mctwf_sunday_of_week
+  week_ending_date = week_ending_date.mctwf_saturday_of_week
+
+  uncovered_weeks = []
+  
+  (week_starting_date..week_ending_date).select{|x| x.wday == 6}.each do |wk_ending_date|
+    uncovered_weeks << wk_ending_date if (Eligibility::Coverage::Repository.is_covered?(member_id, wk_ending_date) == false)
   end
-  people_with_gaps
+  uncovered_weeks
 end 
 
 
-def create_statements_for(people_with_enough_money,statement_date)
+def create_statements_for(record,statement_date)
 
-  people_with_enough_money.each do |record|
-    new_record = record.merge(:user_date => Time.now,
-                 :is_reversal => 'N',
-                 :note => '')
+  new_record = record.merge(:user_date => Time.now, :is_reversal => 'N', :note => '')
+  FreightStatement.insert_freight_stmt_record new_record, statement_date
 
-
-    #
-    # Insert to the statement
-    #
-    FreightStatement.insert_freight_stmt_record new_record, statement_date
-    
-
-    #
-    # insert to the account
-    #
-    new_record[:amount] = Money.new(new_record[:amount].amount * -1)
-    Eligibility::FreightAccumulation::Repository.add_coverage_record FreightAccountEntry.new(new_record), FreightAccountEntry.coverage, 'N'
-  end
 end
 
 
-def create_freight_benefit_records
+def create_freight_benefit_records member_id 
 
-  Eligibility::FreightAccumulation::Repository.freight_member_ids.each do |member_id|
     account_entries =  Eligibility::FreightAccumulation::Repository.get_all_freight_account member_id
     coverage_entries = FreightAccountEntry.get_account_current_coverage_entries(account_entries)
-
     if coverage_entries.count > 0
       coverage_entries.each do |entry|
         Eligibility::FreightBenefit::Repository.save entry.member_id, coverage_entries.collect{|x| x.week_starting_date + 6 }
       end
     end
-  end
+
 end
 
  
@@ -300,18 +275,18 @@ def consecutive_months?(d1, d2)
 end
 
 
-def last_coverage_entry_in_account(member_id)
-  repo = Eligibility::FreightAccumulation::Repository
-  account_entries = Eligibility::FreightAccumulation::Repository.get_freight_account (member_id) 
-  account_entries.sort{|x,y| x.user_date <=> y.user_date}
-                                .select{|x| (x.is_reversal? == false) && (x.is_coverage?)}.last 
-end
+# def last_coverage_entry_in_account(member_id)
+#   repo = Eligibility::FreightAccumulation::Repository
+#   account_entries = Eligibility::FreightAccumulation::Repository.get_freight_account (member_id) 
+#   account_entries.sort{|x,y| x.user_date <=> y.user_date}
+#                                 .select{|x| (x.is_reversal? == false) && (x.is_coverage?)}.last 
+# end
 
 
-def has_coverage_entry_in_account?(member_id)
+# def has_coverage_entry_in_account?(member_id)
   
-  last_coverage_entry_in_account(member_id).nil? == false 
-end
+#   last_coverage_entry_in_account(member_id).nil? == false 
+# end
 
 
 def enough_for_coverage? member_id, week_ending_date 
@@ -327,18 +302,8 @@ def enough_for_coverage? member_id, week_ending_date
 end
 
 
-
-def add_to_collection_if_sufficient_balance member_id, results, gaps 
-
-
-  gap = gaps.find{|x| x[:member_id] == member_id}
-
-
-  if gap 
-    week_ending_date = gap[:week_starting_date] + 6
-  else
-    week_ending_date = Date.today.mctwf_next_months_weeks.first + 6
-  end
+def create_coverage_record member_id, week_ending_date
+  week_starting_date = week_ending_date - 6
 
   account_entries = Eligibility::FreightAccumulation::Repository.get_freight_account(member_id)
   return if account_entries.count == 0
@@ -351,26 +316,10 @@ def add_to_collection_if_sufficient_balance member_id, results, gaps
 
     record =  {:member_id => member_id, :amount => rate_info[:amount], :plan_code => rate_info[:plan_code], :billing_tier => rate_info[:billing_tier], :company_information_id => company_information_id, :is_coverage_applied => 'N',
                 :week_applied_start => nil, :week_applied_end => nil, :week_starting_date => week_ending_date -6 }
+    record[:amount] = Money.new(record[:amount].amount * -1)
+    Eligibility::FreightAccumulation::Repository.add_coverage_record FreightAccountEntry.load_new(record), FreightAccountEntry.coverage, 'N'
 
-
-    if gap
-      record = record.merge({:week_applied_start => gap[:week_starting_date], :week_applied_end => week_ending_date, :is_coverage_applied => 'Y' }) 
-    end
-
-    results << record 
   end
-end
-
-
-def people_with_sufficient_balances
-
-  gaps = people_with_coverage_gap_next_month
-
-  results = []
-  Eligibility::FreightAccumulation::Repository.freight_member_ids.each do |member_id| 
-    add_to_collection_if_sufficient_balance member_id, results, gaps
-  end
-  results 
 end
 
 
@@ -381,7 +330,23 @@ def request_elig_be_run_for_all_fb_members
 end
 
 
-def create_statements
+def create_coverge
+  bookmarks = BOOKMARKS.select{|b| b.has_enough_money && ( b.initial_statement_created?)  }
+  bookmarks.each do |bookmark|
+    end_date = (Date.today == bookmark.date_initial_statement_created ? Date.today.mctwf_saturday_of_week + 7 : Date.today )
+    proposed_coverage__week_ending_date = get_uncovered_weeks_between(bookmark.member_id, bookmark.date_initial_statement_created, end_date).last
+
+
+    if proposed_coverage__week_ending_date && enough_for_coverage?(bookmark.member_id, proposed_coverage__week_ending_date)   #double check the amounts one more time...
+ 
+      create_coverage_record bookmark.member_id, proposed_coverage__week_ending_date       
+
+    end
+  end
+end
+
+
+def create_statements 
 
   if time_to_create_statements? == false
     puts "Statements not created."
@@ -396,17 +361,26 @@ def create_statements
     statement_date      = Date.today 
 
 
-    #
-    # create statements for those people for whom coverage was created. 
-    #
-    create_statements_for(people_with_sufficient_balances, statement_date )
+    #------------------------------------
     
 
 
+    # flag members who now have enough for coverage.
     #
-    # (Re)Create freight benefit records. 
+    # find those who have enough money and statement has not already been sent
     #
-    create_freight_benefit_records
+    #
+    bookmarks = BOOKMARKS.select{|b| b.has_enough_money && ( ! b.initial_statement_created?)  }
+    bookmarks.each do |bookmark|
+      if enough_for_coverage?(bookmark.member_id, Date.today.mctwf_saturday_of_week)   #double check the amounts one more time...
+        bookmark.date_initial_statement_created = Date.today 
+        Eligibility::FreightAccumulation::Repository.save_bookmarks  [bookmark]
+      end
+    end
+
+    #------------------------------------
+
+
 
 
 
@@ -438,7 +412,10 @@ end
 def run
   puts "Called with time of #{Time.now.strftime("%m/%d/%Y %H:%M:%S %P")}"
   update_accounts 
-  # create_statements 
+  create_statements 
+  create_coverge
+
+
 end
 
 def summary 

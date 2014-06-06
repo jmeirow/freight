@@ -25,7 +25,7 @@ module Util
   def self.log_sql sql, file_name
     if ENV['log_sql'] == 'Y' 
       if ['development','test'].include?(ENV['ENVIRONMENT'])
-        File.delete("tmp/#{file_name}")
+        File.delete("tmp/#{file_name}") if File.exist?("tmp/#{file_name}")
         File.open("tmp/#{file_name}", "a") do |f|
           f.puts sql
         end
@@ -316,8 +316,6 @@ module  Billing
 
         File.delete("tmp/debug1.txt")
         File.open("tmp/debug1.txt", "a") do |f|
-          f.puts "#{ '=' * 80  }"  
-          f.puts "Date/Time: #{Time.now.strftime('%m/%d/%Y %H:%M:%S %P')} "
           f.puts "#{ '-' * 80  }"
           f.puts caller
           f.puts ""
@@ -471,11 +469,10 @@ module Eligibility
           hash = Hash.new
           hash[:member_id] = row[:memberid]
           hash[:has_enough_money] = row[:hasenoughmoney] 
-          hash[:statement_created] = row[:statementcreated]
-          if row[:sufficientbalancedate].nil?
-            hash[:sufficient_balance_date] =  nil
+          if row[:dateinitialstatementcreated].nil?
+            hash[:date_initial_statement_created] =  nil
           else
-            hash[:sufficient_balance_date] =  row[:sufficientbalancedate].to_date
+            hash[:date_initial_statement_created] =  row[:dateinitialstatementcreated].to_date
           end
           records << Bookmark.load(hash)   
         end
@@ -492,19 +489,11 @@ module Eligibility
         db = Connection.db_teamsters
         bookmarks.each do |bookmark|
           if bookmark.insert?
-            sql = "INSERT INTO FreightBookmarks ( MemberID, HasEnoughMoney, StatementCreated, SufficientBalanceDate  ) VALUES (?, ?, ?, ? ) "
-            # sql = "INSERT INTO FreightBookmarks ( MemberID, HasEnoughMoney, StatementCreated, SufficientBalanceDate  ) 
-            # VALUES (  #{ bookmark.member_id}, 
-            #           #{bookmark.has_enough_money   ? 1 : 0}, 
-            #           #{bookmark.statement_created  ? 1 : 0}, 
-            #           #{self.format_sql_nullable_date(bookmark.sufficient_balance_date)} ) "
-            # puts sql
-            # db[sql].insert 
-
-             db[sql,   bookmark.member_id, bookmark.has_enough_money   ? 1 : 0,  bookmark.statement_created ? 1 : 0,  bookmark.sufficient_balance_date ].insert
+            sql = "INSERT INTO FreightBookmarks ( MemberID, HasEnoughMoney,   DateInitialStatementCreated  ) VALUES (?, ?, ?  ) "
+             db[sql,   bookmark.member_id, bookmark.has_enough_money   ? 1 : 0,     bookmark.date_initial_statement_created ].insert
           else
-            sql = "Update FreightBookmarks set HasEnoughMoney = ?, StatementCreated =? , SufficientBalanceDate = ?  where MemberId = ?"
-            db[sql,    bookmark.has_enough_money   ? 1 : 0,  bookmark.statement_created ? 1 : 0,  bookmark.sufficient_balance_date ,  bookmark.member_id ].update
+            sql = "Update FreightBookmarks set HasEnoughMoney = ?,    DateInitialStatementCreated = ?  where MemberId = ?"
+            db[sql,    bookmark.has_enough_money   ? 1 : 0,     bookmark.date_initial_statement_created ,  bookmark.member_id ].update
           end
         end
       end
@@ -690,7 +679,7 @@ module Eligibility
               "
 
         records = []
-        Util.log_sql(sql, "xxxxx")
+        Util.log_sql(sql, "xxxxx.sql")
         db.fetch(sql).each do |row|
           records <<  row[:memberid] 
         end
@@ -705,6 +694,7 @@ module Eligibility
   module FreightBenefit 
     class Repository
       def self.save member_id, records  
+
         db = Connection.db_teamsters
         db["DELETE FROM FreightBenefit WHERE MemberId = ?", member_id].delete
         sql = "INSERT INTO FreightBenefit ( MemberID, WeekEnding, StatusCode  ) VALUES (?, ?, ?  ) "
