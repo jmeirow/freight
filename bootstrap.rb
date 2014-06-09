@@ -9,6 +9,12 @@ require 'pstore'
 require 'pry'
 require 'pry_debug'
 
+require 'yaml'
+
+
+config = YAML.load_file('config.yml')
+COVERAGE_WINDOW = config['coverage_window'].to_i
+
 
 
 FREIGHT_PSTORE = 'freight.pstore'
@@ -28,29 +34,32 @@ class Object
 end
 
 
+
 def scratch
 
   # experimemtal code goes here....
 end
 
 
-def create_adjustments_when_amount_changes(member_id, account_entries)
 
-  current_fb_weeks = FreightAccountEntry.get_account_current_coverage_entries(account_entries)
+# def create_adjustments_when_amount_changes(member_id, account_entries)
 
-  current_fb_weeks.each do |fb_week|
-    coverage_info = repo.get_rates_for_week_ending member_id, company_information_id ,fb_week.week_starting_date + 6
-    if coverage_info.amount != fb_week.amount
-      if coverage_info.BillingTier != fb_week.billing_tier 
-         Eligibility::FreightAccumulation::Repository.reverse_fb_week(fb_week, 'Billing tier changed')
-      elsif coverage_info.plancode != fb_week_plan_code
-        Eligibility::FreightAccumulation::Repository.reverse_fb_week(fb_week, 'Plan code changed.')
-      else
-        Eligibility::FreightAccumulation::Repository.reverse_fb_week(fb_week, 'Amount changed,  though plan code and billing tier are the same.')
-      end
-    end
-  end
-end
+#   current_fb_weeks = FreightAccountEntry.get_account_current_coverage_entries(account_entries)
+
+#   current_fb_weeks.each do |fb_week|
+#     coverage_info = repo.get_rates_for_week_ending member_id, company_information_id ,fb_week.week_starting_date + 6
+#     if coverage_info.amount != fb_week.amount
+#       if coverage_info.BillingTier != fb_week.billing_tier 
+#          Eligibility::FreightAccumulation::Repository.reverse_fb_week(fb_week, 'Billing tier changed')
+#       elsif coverage_info.plancode != fb_week_plan_code
+#         Eligibility::FreightAccumulation::Repository.reverse_fb_week(fb_week, 'Plan code changed.')
+#       else
+#         Eligibility::FreightAccumulation::Repository.reverse_fb_week(fb_week, 'Amount changed,  though plan code and billing tier are the same.')
+#       end
+#     end
+#   end
+# end
+
 
 
 def create_adjustments_for_replaced_fb (member_id, account_entries)
@@ -68,103 +77,13 @@ def create_adjustments_for_replaced_fb (member_id, account_entries)
 end
 
 
-def update_accounts
-  if (1..5).cover?Date.today.wday
-    puts "Updating accounts..."
-    Eligibility::FreightAccumulation::Repository.freight_member_ids.each do |member_id|
-    
-
-      #
-      # get base data
-      #
-      emp_stat_data =nil 
-
-      if first_allocation_period.cover?Date.today 
-        emp_stat_data =   Eligibility::FreightAccumulation::Repository.half_pay_from_bbs_2012(member_id)
-        emp_stat_data +=  Eligibility::FreightAccumulation::Repository.half_pay_weeks(member_id, half_pay_date_range)
-      else
-        emp_stat_data = Eligibility::FreightAccumulation::Repository.half_pay_weeks(member_id, current_allocation_period)
-      end
-
-
-      account_entries = Eligibility::FreightAccumulation::Repository.get_freight_account(member_id) 
-
-
-      #
-      # compute account additions from daily rate contributions
-      #
-      additions = FreightAccountEntry.get_additions_for_account(emp_stat_data, account_entries)
-
-
-      #
-      # add entries to account...
-      #
-      Eligibility::FreightAccumulation::Repository.add additions, FreightAccountEntry.contribution, 'N'
-   
-
-      #
-      # re-fetch the updated account data...
-      #
-      account_entries = Eligibility::FreightAccumulation::Repository.get_freight_account (member_id) 
-
-
-      #
-      # compute reversals (correction) of daily rate contributions that have been deleted
-      #
-      deleted_weeks = FreightAccountEntry.get_deleted_weeks_for_account(emp_stat_data, account_entries)
-      deletions = deleted_weeks.collect{|week| account_entries.find{|x| x.week_starting_date == week && x.is_contribution? }}
-      Eligibility::FreightAccumulation::Repository.reverse (deletions)
-   
-
-
-      #
-      # re-fetch the updated account data...
-      #
-      account_entries = Eligibility::FreightAccumulation::Repository.get_freight_account (member_id) 
-
-
-
-      #
-      # compute additions to account because previously created FB week(s) replaced by other coverage
-      #
-      create_adjustments_for_replaced_fb(member_id, account_entries)
-      
-
-      #
-      # re-fetch the updated account data...
-      #
-      account_entries = Eligibility::FreightAccumulation::Repository.get_freight_account (member_id) 
-
-
-      #
-      # create - update bookmark
-      #
-      
-      bookmark = get_bookmark(member_id)
-
-      if enough_for_coverage?(member_id, Date.today.mctwf_saturday_of_week)
-        bookmark.has_enough_money = true
-      else
-        bookmark.has_enough_money = false
-        bookmark.date_initial_statement_created = nil
-      end
- 
-       create_freight_benefit_records member_id
-
-
-    end
-  else
-    puts "Today is a weekend. Not updating accounts."
-  end
-  Eligibility::FreightAccumulation::Repository.save_bookmarks(BOOKMARKS.select{|bookmark | bookmark.dirty? } )
-end
-
 
 def get_bookmark member_id
   bookmark = BOOKMARKS.find{|x| x.member_id == member_id} || Bookmark.load_new(   member_id:member_id, enough_money:false, statement_created:false, sufficient_balance_date:nil )
   BOOKMARKS << bookmark if bookmark.dirty?
   bookmark
 end
+
 
 
 def statements_have_never_run_before?
@@ -177,6 +96,7 @@ def statements_have_never_run_before?
 end
 
 
+
 def last_statement_run_date
   store = PStore.new(FREIGHT_PSTORE)
   last_run_date = nil
@@ -185,6 +105,7 @@ def last_statement_run_date
   end
   last_run_date.to_date
 end
+
 
 
 def time_to_create_statements?
@@ -202,10 +123,11 @@ def time_to_create_statements?
 end
 
  
+
 def get_uncovered_weeks_between member_id, week_starting_date, week_ending_date
 
-  week_starting_date = week_starting_date.mctwf_sunday_of_week
-  week_ending_date = week_ending_date.mctwf_saturday_of_week
+  # week_starting_date = week_starting_date.mctwf_sunday_of_week
+  # week_ending_date = week_ending_date.mctwf_saturday_of_week
 
   uncovered_weeks = []
   
@@ -216,25 +138,13 @@ def get_uncovered_weeks_between member_id, week_starting_date, week_ending_date
 end 
 
 
+
 def create_statements_for(record,statement_date)
 
   new_record = record.merge(:user_date => Time.now, :is_reversal => 'N', :note => '')
   FreightStatement.insert_freight_stmt_record new_record, statement_date
-
 end
 
-
-def create_freight_benefit_records member_id 
-
-    account_entries =  Eligibility::FreightAccumulation::Repository.get_all_freight_account member_id
-    coverage_entries = FreightAccountEntry.get_account_current_coverage_entries(account_entries)
-    if coverage_entries.count > 0
-      coverage_entries.each do |entry|
-        Eligibility::FreightBenefit::Repository.save entry.member_id, coverage_entries.collect{|x| x.week_starting_date + 6 }
-      end
-    end
-
-end
 
  
 def record_statement_date statement_datetime
@@ -243,6 +153,7 @@ def record_statement_date statement_datetime
     store[PSTORE_LAST_RUN] = statement_datetime
   end
 end
+
 
 
 def lesser_of(d1, d2)
@@ -254,6 +165,7 @@ def lesser_of(d1, d2)
 end
 
 
+
 def greater_of(d1, d2)
   if d1 > d2 
     d1
@@ -261,6 +173,7 @@ def greater_of(d1, d2)
     d2
   end
 end
+
 
 
 def consecutive_months?(d1, d2)
@@ -275,19 +188,6 @@ def consecutive_months?(d1, d2)
 end
 
 
-# def last_coverage_entry_in_account(member_id)
-#   repo = Eligibility::FreightAccumulation::Repository
-#   account_entries = Eligibility::FreightAccumulation::Repository.get_freight_account (member_id) 
-#   account_entries.sort{|x,y| x.user_date <=> y.user_date}
-#                                 .select{|x| (x.is_reversal? == false) && (x.is_coverage?)}.last 
-# end
-
-
-# def has_coverage_entry_in_account?(member_id)
-  
-#   last_coverage_entry_in_account(member_id).nil? == false 
-# end
-
 
 def enough_for_coverage? member_id, week_ending_date 
 
@@ -300,6 +200,7 @@ def enough_for_coverage? member_id, week_ending_date
 
   (balance  >= rate_info[:amount] )
 end
+
 
 
 def create_coverage_record member_id, week_ending_date
@@ -323,6 +224,7 @@ def create_coverage_record member_id, week_ending_date
 end
 
 
+
 def request_elig_be_run_for_all_fb_members
   Eligibility::FreightAccumulation::Repository.freight_member_ids.each do |member_id| 
     Eligibility::FreightBenefit::Repository.insert_into_changed_member_id(member_id)
@@ -330,20 +232,106 @@ def request_elig_be_run_for_all_fb_members
 end
 
 
-def create_coverge
-  bookmarks = BOOKMARKS.select{|b| b.has_enough_money && ( b.initial_statement_created?)  }
-  bookmarks.each do |bookmark|
-    end_date = (Date.today == bookmark.date_initial_statement_created ? Date.today.mctwf_saturday_of_week + 7 : Date.today )
-    proposed_coverage__week_ending_date = get_uncovered_weeks_between(bookmark.member_id, bookmark.date_initial_statement_created, end_date).last
 
-
-    if proposed_coverage__week_ending_date && enough_for_coverage?(bookmark.member_id, proposed_coverage__week_ending_date)   #double check the amounts one more time...
- 
-      create_coverage_record bookmark.member_id, proposed_coverage__week_ending_date       
-
+def create_freight_benefit_records  
+  Eligibility::FreightAccumulation::Repository.freight_member_ids.each do |member_id|
+    account_entries =  Eligibility::FreightAccumulation::Repository.get_all_freight_account member_id
+    coverage_entries = FreightAccountEntry.get_account_current_coverage_entries(account_entries)
+    if coverage_entries.count > 0
+      coverage_entries.each do |entry|
+        Eligibility::FreightBenefit::Repository.save entry.member_id, coverage_entries.collect{|x| x.week_starting_date + 6 }
+      end
     end
   end
 end
+
+
+
+def update_accounts
+
+  puts "Updating accounts..."
+  Eligibility::FreightAccumulation::Repository.freight_member_ids.each do |member_id|
+  
+
+    #
+    # get base data
+    #
+    emp_stat_data =nil 
+
+    if first_allocation_period.cover?Date.today 
+      emp_stat_data =   Eligibility::FreightAccumulation::Repository.half_pay_from_bbs_2012(member_id)
+      emp_stat_data +=  Eligibility::FreightAccumulation::Repository.half_pay_weeks(member_id, half_pay_date_range)
+    else
+      emp_stat_data = Eligibility::FreightAccumulation::Repository.half_pay_weeks(member_id, current_allocation_period)
+    end
+
+
+    account_entries = Eligibility::FreightAccumulation::Repository.get_freight_account(member_id) 
+
+
+    #
+    # compute account additions from daily rate contributions
+    #
+    additions = FreightAccountEntry.get_additions_for_account(emp_stat_data, account_entries)
+
+
+    #
+    # add entries to account...
+    #
+    Eligibility::FreightAccumulation::Repository.add additions, FreightAccountEntry.contribution, 'N'
+ 
+
+    #
+    # re-fetch the updated account data...
+    #
+    account_entries = Eligibility::FreightAccumulation::Repository.get_freight_account (member_id) 
+
+
+    #
+    # compute reversals (correction) of daily rate contributions that have been deleted
+    #
+    deleted_weeks = FreightAccountEntry.get_deleted_weeks_for_account(emp_stat_data, account_entries)
+    deletions = deleted_weeks.collect{|week| account_entries.find{|x| x.week_starting_date == week && x.is_contribution? }}
+    Eligibility::FreightAccumulation::Repository.reverse (deletions)
+ 
+
+
+    #
+    # re-fetch the updated account data...
+    #
+    account_entries = Eligibility::FreightAccumulation::Repository.get_freight_account (member_id) 
+
+
+
+    #
+    # compute additions to account because previously created FB week(s) replaced by other coverage
+    #
+    create_adjustments_for_replaced_fb(member_id, account_entries)
+    
+
+    #
+    # re-fetch the updated account data...
+    #
+    account_entries = Eligibility::FreightAccumulation::Repository.get_freight_account (member_id) 
+
+
+    #
+    # create - update bookmark
+    #
+    
+    bookmark = get_bookmark(member_id)
+
+    if enough_for_coverage?(member_id, Date.today.mctwf_saturday_of_week)
+      bookmark.has_enough_money = true
+    else
+      bookmark.has_enough_money = false
+      bookmark.date_initial_statement_created = nil
+    end
+  end   
+ 
+  Eligibility::FreightAccumulation::Repository.save_bookmarks(BOOKMARKS.select{|bookmark | bookmark.dirty? } )
+end
+
 
 
 def create_statements 
@@ -402,10 +390,38 @@ end
 
 
 
+def create_coverge
+  
+
+  bookmarks = BOOKMARKS.select{|b| b.has_enough_money && ( b.initial_statement_created?)  }
+  bookmarks.each do |bookmark|
+  
+    t1 = bookmark.date_initial_statement_created.mctwf_sunday_of_week
+    t2 = t1 + 13
+    if (t1..t2).cover?(Date.today) 
+      # WITHIN TWO WEEKS OF INITIAL NOTIFICATION 
+      from_date = Date.today.mctwf_next_months_weeks.first 
+      to_date = Date.today.mctwf_next_months_weeks.last 
+    else
+      from_date =  Date.today.mctwf_sunday_of_week - ( COVERAGE_WINDOW * 7 )
+      to_date = Date.today.mctwf_saturday_of_week 
+    end 
+
+    proposed_coverage__week_ending_date = get_uncovered_weeks_between(bookmark.member_id,from_date, to_date).first
+
+    if proposed_coverage__week_ending_date && enough_for_coverage?(bookmark.member_id, proposed_coverage__week_ending_date)   #double check the amounts one more time...
+ 
+      create_coverage_record bookmark.member_id, proposed_coverage__week_ending_date       
+
+    end
+  end
+end
+
+
 #
 #
 #
-# program main stubs...
+# methods called as command line parameters..
 #
 #
 #
@@ -414,8 +430,7 @@ def run
   update_accounts 
   create_statements 
   create_coverge
-
-
+  create_freight_benefit_records 
 end
 
 def summary 

@@ -16,6 +16,8 @@
 .repl_history
 build/
 
+*.bat
+
 ## Documentation cache and generated files:
 /.yardoc/
 /_yardoc/
