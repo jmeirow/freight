@@ -6,12 +6,13 @@ require_relative './daily_rate_contribution.rb'
 require_relative './freight_account_entry.rb'
 require_relative './allocation_periods.rb'
 require_relative './bookmark.rb'
+require_relative './config.rb'
 
 
 module Util
   def self.reset
     if ENV['ENVIRONMENT'].nil? || (ENV['ENVIRONMENT'] != 'development' && ENV['ENVIRONMENT'] != 'test')
-      puts "Unable to verify this machine is a 'dev' or 'test' machine. Quitting..."
+      puts "Unable to verify this machine is a 'development' or 'test' machine. Quitting..."
     else 
       db = Connection.db_teamsters
       db["delete from FreightAccount"].delete 
@@ -23,7 +24,7 @@ module Util
   end
 
   def self.log_sql sql, file_name
-    if ENV['log_sql'] == 'Y' 
+    if Freight::Config.log_sql == 'Y' 
       if ['development','test'].include?(ENV['ENVIRONMENT'])
         File.delete("tmp/#{file_name}") if File.exist?("tmp/#{file_name}")
         File.open("tmp/#{file_name}", "a") do |f|
@@ -313,21 +314,6 @@ module  Billing
           record[:amount] = Money.new(row[:amount]) 
         end
 
-
-        File.delete("tmp/debug1.txt")
-        File.open("tmp/debug1.txt", "a") do |f|
-          f.puts "#{ '-' * 80  }"
-          f.puts caller
-          f.puts ""
-          f.puts "#{ '-' * 80  }"
-          f.puts "record = #{record}"
-          f.puts "#{ '=' * 80  }"
-          f.puts ""
-        end
-        
-
-        
-
         record
       end
 
@@ -496,6 +482,7 @@ module Eligibility
             db[sql,    bookmark.has_enough_money   ? 1 : 0,     bookmark.date_initial_statement_created ,  bookmark.member_id ].update
           end
         end
+        $bookmarks = Eligibility::FreightAccumulation::Repository.get_bookmarks 
       end
 
 
@@ -580,12 +567,13 @@ module Eligibility
           INNER JOIN ParticipantEmploymentHistory B on A.WeekEnding between b.FromDate and b.ToDate
           WHERE WeekEnding  between ? and  ?
           AND EmploymentStatus = 'CH'
-          AND memberid = ?  "
+          AND memberid = ?   
+          AND WeekEnding <= ? "
 
 
         
         records = []
-        db.fetch(sql, allocation_period.first, allocation_period.last, member_id  ).each do |row|
+        db.fetch(sql, allocation_period.first, allocation_period.last, member_id , Date.today.mctwf_saturday_of_week ).each do |row|
           hash = Hash.new
           hash[:member_id] = member_id
           hash[:week_starting_date] = row[:weekstarting].to_date

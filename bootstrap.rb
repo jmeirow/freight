@@ -2,25 +2,23 @@ require_relative './allocation_periods.rb'
 require_relative './repository.rb'
 require_relative './date.rb'
 require_relative './freight_account_entry.rb'
+require_relative './config.rb'
+
 require 'pp'
 require 'timecop'
 require 'pstore'
 
-require 'pry'
-require 'pry_debug'
+ 
 
 require 'yaml'
 
-
-config = YAML.load_file('config.yml')
-COVERAGE_WINDOW = config['coverage_window'].to_i
-
+ 
 
 
 FREIGHT_PSTORE = 'freight.pstore'
 PSTORE_LAST_RUN = 'last_run_date'
 
-BOOKMARKS = Eligibility::FreightAccumulation::Repository.get_bookmarks 
+$bookmarks = Eligibility::FreightAccumulation::Repository.get_bookmarks 
 
 
 class Object
@@ -42,23 +40,7 @@ end
 
 
 
-# def create_adjustments_when_amount_changes(member_id, account_entries)
 
-#   current_fb_weeks = FreightAccountEntry.get_account_current_coverage_entries(account_entries)
-
-#   current_fb_weeks.each do |fb_week|
-#     coverage_info = repo.get_rates_for_week_ending member_id, company_information_id ,fb_week.week_starting_date + 6
-#     if coverage_info.amount != fb_week.amount
-#       if coverage_info.BillingTier != fb_week.billing_tier 
-#          Eligibility::FreightAccumulation::Repository.reverse_fb_week(fb_week, 'Billing tier changed')
-#       elsif coverage_info.plancode != fb_week_plan_code
-#         Eligibility::FreightAccumulation::Repository.reverse_fb_week(fb_week, 'Plan code changed.')
-#       else
-#         Eligibility::FreightAccumulation::Repository.reverse_fb_week(fb_week, 'Amount changed,  though plan code and billing tier are the same.')
-#       end
-#     end
-#   end
-# end
 
 
 
@@ -79,8 +61,8 @@ end
 
 
 def get_bookmark member_id
-  bookmark = BOOKMARKS.find{|x| x.member_id == member_id} || Bookmark.load_new(   member_id:member_id, enough_money:false, statement_created:false, sufficient_balance_date:nil )
-  BOOKMARKS << bookmark if bookmark.dirty?
+  bookmark = $bookmarks.find{|x| x.member_id == member_id} || Bookmark.load_new(   member_id:member_id, enough_money:false, statement_created:false, sufficient_balance_date:nil )
+  $bookmarks << bookmark if bookmark.dirty?
   bookmark
 end
 
@@ -329,7 +311,7 @@ def update_accounts
     end
   end   
  
-  Eligibility::FreightAccumulation::Repository.save_bookmarks(BOOKMARKS.select{|bookmark | bookmark.dirty? } )
+  Eligibility::FreightAccumulation::Repository.save_bookmarks($bookmarks.select{|bookmark | bookmark.dirty? } )
 end
 
 
@@ -358,7 +340,7 @@ def create_statements
     # find those who have enough money and statement has not already been sent
     #
     #
-    bookmarks = BOOKMARKS.select{|b| b.has_enough_money && ( ! b.initial_statement_created?)  }
+    bookmarks = $bookmarks.select{|b| b.has_enough_money && ( ! b.initial_statement_created?)  }
     bookmarks.each do |bookmark|
       if enough_for_coverage?(bookmark.member_id, Date.today.mctwf_saturday_of_week)   #double check the amounts one more time...
         bookmark.date_initial_statement_created = Date.today 
@@ -393,7 +375,7 @@ end
 def create_coverge
   
 
-  bookmarks = BOOKMARKS.select{|b| b.has_enough_money && ( b.initial_statement_created?)  }
+  bookmarks = $bookmarks.select{|b| b.has_enough_money && ( b.initial_statement_created?)  }
   bookmarks.each do |bookmark|
   
     t1 = bookmark.date_initial_statement_created.mctwf_sunday_of_week
@@ -403,7 +385,7 @@ def create_coverge
       from_date = Date.today.mctwf_next_months_weeks.first 
       to_date = Date.today.mctwf_next_months_weeks.last 
     else
-      from_date =  Date.today.mctwf_sunday_of_week - ( COVERAGE_WINDOW * 7 )
+      from_date =  Date.today.mctwf_sunday_of_week - ( Freight::Config.coverage_window * 7 )
       to_date = Date.today.mctwf_saturday_of_week 
     end 
 
@@ -448,7 +430,6 @@ def summary
     puts "FreightAccount:      #{Reporting::TableCounts.freight_account_rows}"
     puts "FreightBenefit:      #{Reporting::TableCounts.freight_benefit_rows}"
     puts "FreightStatement:    #{Reporting::TableCounts.freight_statement_rows}"
-
   end
 end
 
@@ -532,6 +513,7 @@ def help
 end
 
 
+
 def show member_id 
 
   entries = Eligibility::FreightAccumulation::Repository.get_freight_account(member_id)
@@ -564,6 +546,14 @@ def show member_id
   end
 end
 
+def show_on_date member_id, arg_time 
+  time = Time.strptime(arg_time, "%m/%d/%Y %H:%M:%S %P")
+  Timecop.travel(  time  ) do 
+    show member_id
+  end
+end
+
+
 def reset 
   Util.reset
 end
@@ -579,21 +569,24 @@ include AllocationPeriods
 
 cmd_found = false 
 
-cmd = ARGV[0].chomp
-opt = ARGV[1].chomp if ARGV[1]
+cmd =   ARGV[0].chomp
+opt1 =  ARGV[1].chomp if ARGV[1]
+opt2 =  ARGV[2].chomp if ARGV[2]
+
+puts "here...."
 
 if cmd == 'run'
   cmd_found = true
   run 
   elsif cmd == 'test'
     cmd_found = true
-    test opt
+    test opt1
   elsif cmd == 'test_statements'
     cmd_found = true
-    test_statements opt.to_i
+    test_statements opt1.to_i
   elsif cmd == 'test_x_days'
     cmd_found = true
-    test_x_days opt.to_i
+    test_x_days opt1.to_i
   elsif cmd == 'summary'
     cmd_found = true
     summary 
@@ -602,7 +595,10 @@ if cmd == 'run'
     balances
   elsif cmd == 'show'
     cmd_found = true  
-    show opt
+    show opt1
+  elsif cmd == 'show_on_date'
+    cmd_found = true  
+    show_on_date opt1, opt2
   elsif cmd == 'help'
     cmd_found = true
     help

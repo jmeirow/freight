@@ -12,21 +12,12 @@ group :development do
   gem 'guard-rspec'
   gem 'rspec-core'
   gem 'rspec-mocks'
+  gem 'rspec'
   gem 'rspec-expectations'
   gem 'ruby_gntp'
   gem 'eventmachine'
   require 'rbconfig'
   gem 'wdm', '>= 0.1.0' if RbConfig::CONFIG['target_os'] =~ /mswin|mingw/i
-  gem 'pry'
-  gem 'pry_debug'
 end
 
-group :test, :development do
-  gem 'rspec'
-end
-
-group :test do
-
-end
-
-
+ 
