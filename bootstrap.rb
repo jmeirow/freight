@@ -573,7 +573,7 @@ cmd =   ARGV[0].chomp
 opt1 =  ARGV[1].chomp if ARGV[1]
 opt2 =  ARGV[2].chomp if ARGV[2]
 
-puts "here...."
+
 
 if cmd == 'run'
   cmd_found = true
